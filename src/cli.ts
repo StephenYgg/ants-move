@@ -25,6 +25,12 @@ import {
   createDefaultToutiaoRuntime,
   type ToutiaoRuntime
 } from './toutiao/runtime.js';
+import {
+  handleGitHubCommandError,
+  registerGitHubCommands
+} from './github/command.js';
+import { createDefaultGitHubRuntime } from './github/runtime.js';
+import type { GitHubRuntime } from './github/types.js';
 
 export interface CliIo {
   stderr: (value: string) => void;
@@ -36,6 +42,7 @@ export interface CliRunner {
 }
 
 export interface CreateCliOptions extends Partial<CliIo> {
+  githubRuntime?: GitHubRuntime;
   hackerNewsRuntime?: HackerNewsRuntime;
   kr36Runtime?: Kr36Runtime;
   toutiaoRuntime?: ToutiaoRuntime;
@@ -68,6 +75,11 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
     stderr: io.stderr,
     stdout: io.stdout
   });
+  registerGitHubCommands(program, {
+    runtime: options.githubRuntime ?? createDefaultGitHubRuntime(),
+    stderr: io.stderr,
+    stdout: io.stdout
+  });
   registerToutiaoCommands(program, {
     runtime: options.toutiaoRuntime ?? createDefaultToutiaoRuntime(),
     stderr: io.stderr,
@@ -82,6 +94,11 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
       } catch (error) {
         if (error instanceof CommanderError && error.exitCode === 0) {
           return 0;
+        }
+
+        const githubExitCode = handleGitHubCommandError(error, io);
+        if (githubExitCode !== undefined) {
+          return githubExitCode;
         }
 
         const toutiaoExitCode = handleToutiaoCommandError(error, io);

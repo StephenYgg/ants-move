@@ -1,6 +1,6 @@
 {
   "name": "ants-move",
-  "version": "0.1.0",
+  "version": "0.0.2",
   "description": "An open-source CLI for collecting and moving data between systems.",
   "homepage": "https://github.com/StephenYgg/ants-move",
   "bugs": {
@@ -29,6 +29,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "cheerio": "1.2.0",
     "commander": "14.0.1",
     "playwright": "1.59.1",
     "table": "6.9.0",

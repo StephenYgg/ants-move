@@ -1,6 +1,6 @@
 # ants-move
 
-`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and future automation commands can move that data into forms and other systems. The first release collects data from 36Kr, Toutiao, and Hacker News.
+`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and future automation commands can move that data into forms and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub Trending data.
 
 ## Installation and requirements
 
@@ -86,11 +86,31 @@ ants hn search <query> [--limit 1..100] [--sort relevance|date] [--format json|t
 
 Hacker News uses at most eight concurrent detail requests. ID-list and search responses are limited to 5 MB, while each Firebase story detail is limited to 256 KB.
 
+## GitHub Trending commands
+
+Fetch every repository shown on GitHub's all-language Trending page. The period defaults to `daily`:
+
+```bash
+ants github trending
+ants github trending --since daily
+ants github trending --since weekly
+ants github trending --since monthly
+```
+
+JSON is the default output. Use `--format table` or `-t` for a terminal table:
+
+```bash
+ants github trending --since weekly --format table
+ants github trending --since monthly -t
+```
+
+The collector reads the official server-rendered HTML with one GitHub request and does not use a third-party Trending API or Playwright. The request has a 30-second timeout and a 5 MB HTML limit. Parsing accepts at most 100 repositories and retains at most ten displayed contributors per repository. The command has no language filter, result limit, automatic retry, or cache; a successful zero-row parse is rejected as a page-structure error instead of returning a misleading empty ranking.
+
 ## High-concurrency usage warning
 
-Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, or `105Q` browser navigations plus page subresources for a Toutiao author collection.
+Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, or `Q` requests for GitHub Trending.
 
-Retained collector data is also bounded per invocation: 5 MB for a 36Kr list, approximately 50 MB across 200 Hacker News candidate details before result filtering, and 10 MB for Toutiao author article results. Toutiao may additionally hold up to five active 5 MB feed buffers inside one browser session; browser process overhead and required page subresources are separate from these payload limits.
+Retained collector data is also bounded per invocation: 5 MB for a 36Kr list, approximately 50 MB across 200 Hacker News candidate details before result filtering, 10 MB for Toutiao author article results, and one 5 MB GitHub HTML response before Cheerio parsing. Toutiao may additionally hold up to five active 5 MB feed buffers inside one browser session; browser process overhead, required page subresources, and HTML parser object overhead are separate from these payload limits.
 
 Do not place the CLI directly on a high-QPS request path. Online services must use an external bounded queue and a shared rate limiter to apply backpressure across processes and instances. This project has no distributed lock, shared cache, retry queue, or multi-instance single-flight mechanism.
 

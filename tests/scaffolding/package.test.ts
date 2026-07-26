@@ -8,6 +8,7 @@ describe('package scaffolding', () => {
       bin?: Record<string, string>;
       engines?: { node?: string };
       files?: string[];
+      version?: string;
     };
 
     expect(packageJson.bin).toEqual({
@@ -16,6 +17,7 @@ describe('package scaffolding', () => {
     });
     expect(packageJson.engines?.node).toBe('>=22.0.0');
     expect(packageJson.files).toEqual(['dist']);
+    expect(packageJson.version).toBe('0.0.2');
   });
 
   it('builds an ESM Node 22 entrypoint with a shebang', () => {
