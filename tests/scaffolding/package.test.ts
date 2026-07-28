@@ -17,7 +17,7 @@ describe('package scaffolding', () => {
     });
     expect(packageJson.engines?.node).toBe('>=22.0.0');
     expect(packageJson.files).toEqual(['dist']);
-    expect(packageJson.version).toBe('0.0.2');
+    expect(packageJson.version).toBe('0.0.3');
   });
 
   it('builds an ESM Node 22 entrypoint with a shebang', () => {
