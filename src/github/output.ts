@@ -1,5 +1,19 @@
 import { renderSafeTable } from '../output.js';
-import type { GitHubTrendingResult } from './types.js';
+import type {
+  GitHubReadmeResult,
+  GitHubTrendingResult
+} from './types.js';
+
+export function renderGitHubReadmeAsJson(result: GitHubReadmeResult): string {
+  return JSON.stringify(
+    {
+      ok: true,
+      data: result
+    },
+    null,
+    2
+  );
+}
 
 export function renderGitHubTrendingAsJson(result: GitHubTrendingResult): string {
   return JSON.stringify(

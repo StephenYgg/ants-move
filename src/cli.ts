@@ -42,7 +42,8 @@ export interface CliRunner {
 }
 
 export interface CreateCliOptions extends Partial<CliIo> {
-  githubRuntime?: GitHubRuntime;
+  githubRuntime?: Omit<GitHubRuntime, 'fetchReadme'> &
+    Partial<Pick<GitHubRuntime, 'fetchReadme'>>;
   hackerNewsRuntime?: HackerNewsRuntime;
   kr36Runtime?: Kr36Runtime;
   toutiaoRuntime?: ToutiaoRuntime;
@@ -58,6 +59,13 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
     .description('Move data between systems with composable collectors.')
     .showHelpAfterError()
     .exitOverride();
+  const defaultGitHubRuntime = createDefaultGitHubRuntime();
+  const githubRuntime: GitHubRuntime = {
+    fetchReadme: options.githubRuntime?.fetchReadme ??
+      defaultGitHubRuntime.fetchReadme,
+    fetchTrending: options.githubRuntime?.fetchTrending ??
+      defaultGitHubRuntime.fetchTrending
+  };
 
   program.configureOutput({
     outputError: () => undefined,
@@ -76,7 +84,7 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
     stdout: io.stdout
   });
   registerGitHubCommands(program, {
-    runtime: options.githubRuntime ?? createDefaultGitHubRuntime(),
+    runtime: githubRuntime,
     stderr: io.stderr,
     stdout: io.stdout
   });

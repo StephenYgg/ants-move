@@ -1,6 +1,6 @@
 # ants-move
 
-`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and future automation commands can move that data into forms and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub Trending data.
+`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and future automation commands can move that data into forms and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub data.
 
 ## Installation and requirements
 
@@ -86,7 +86,9 @@ ants hn search <query> [--limit 1..100] [--sort relevance|date] [--format json|t
 
 Hacker News uses at most eight concurrent detail requests. ID-list and search responses are limited to 5 MB, while each Firebase story detail is limited to 256 KB.
 
-## GitHub Trending commands
+## GitHub commands
+
+### GitHub Trending
 
 Fetch every repository shown on GitHub's all-language Trending page. The period defaults to `daily`:
 
@@ -106,9 +108,22 @@ ants github trending --since monthly -t
 
 The collector reads the official server-rendered HTML with one GitHub request and does not use a third-party Trending API or Playwright. The request has a 30-second timeout and a 5 MB HTML limit. Parsing accepts at most 100 repositories and retains at most ten displayed contributors per repository. The command has no language filter, result limit, automatic retry, or cache; a successful zero-row parse is rejected as a page-structure error instead of returning a misleading empty ranking.
 
+### GitHub README
+
+Fetch the preferred README from the default branch of a public repository:
+
+```bash
+ants github readme https://github.com/owner/repository
+ants github readme https://github.com/owner/repository.git
+```
+
+The command returns JSON containing the raw UTF-8 README content together with its name, path, SHA, byte size, HTML URL, download URL, canonical repository URL, and API source URL. It uses the documented `api.github.com/repos/{owner}/{repo}/readme` endpoint and performs one bounded GitHub API request with a 30-second timeout and a 5 MB response limit. It does not scrape repository pages, probe Raw URLs, retry, or fall back to another request. It does not read `GITHUB_TOKEN`.
+
+Only public repositories are supported. GitHub normally limits unauthenticated REST clients sharing one source IP to 60 requests per hour. When that allowance is exhausted, the command returns `GITHUB_RATE_LIMITED` without retrying.
+
 ## High-concurrency usage warning
 
-Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, or `Q` requests for GitHub Trending.
+Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, or `Q` requests for either GitHub Trending or GitHub README. README collection also briefly retains a bounded API response, parsed JSON, Base64 text, and decoded content; anonymous callers sharing a source IP normally share GitHub's 60 requests per hour limit, and rate-limit failures do not retry or fall back.
 
 Retained collector data is also bounded per invocation: 5 MB for a 36Kr list, approximately 50 MB across 200 Hacker News candidate details before result filtering, 10 MB for Toutiao author article results, and one 5 MB GitHub HTML response before Cheerio parsing. Toutiao may additionally hold up to five active 5 MB feed buffers inside one browser session; browser process overhead, required page subresources, and HTML parser object overhead are separate from these payload limits.
 

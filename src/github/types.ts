@@ -26,7 +26,27 @@ export interface GitHubTrendingRuntimeResult {
   sourceUrl: string;
 }
 
+export interface GitHubReadmeRuntimeResult {
+  content: string;
+  downloadUrl: string;
+  htmlUrl: string;
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  sourceUrl: string;
+}
+
+export interface GitHubReadmeResult extends GitHubReadmeRuntimeResult {
+  repository: string;
+  repositoryUrl: string;
+}
+
 export interface GitHubRuntime {
+  fetchReadme: (options: {
+    owner: string;
+    repo: string;
+  }) => Promise<GitHubReadmeRuntimeResult>;
   fetchTrending: (options: {
     period: GitHubTrendingPeriod;
   }) => Promise<GitHubTrendingRuntimeResult>;

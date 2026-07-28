@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import {
   renderGitHubCommandErrorAsJson,
+  renderGitHubReadmeAsJson,
   renderGitHubTrendingAsJson,
   renderGitHubTrendingAsTable
 } from './output.js';
@@ -30,8 +31,16 @@ export function registerGitHubCommands(
 ): void {
   const github = program
     .command('github')
-    .description('Fetch GitHub Trending repositories.');
+    .description('Fetch GitHub repository data.');
   const service = new GitHubService({ runtime: dependencies.runtime });
+
+  github.command('readme')
+    .description('Fetch the preferred README for a public GitHub repository.')
+    .argument('<repository-url>', 'public GitHub repository root URL')
+    .action(async (repositoryUrl: string) => {
+      const result = await service.readme(repositoryUrl);
+      dependencies.stdout(`${renderGitHubReadmeAsJson(result)}\n`);
+    });
 
   github.command('trending')
     .description('Fetch the all-language GitHub Trending page.')

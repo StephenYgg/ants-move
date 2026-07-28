@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   renderGitHubCommandErrorAsJson,
+  renderGitHubReadmeAsJson,
   renderGitHubTrendingAsJson,
   renderGitHubTrendingAsTable
 } from '../../src/github/output.js';
-import type { GitHubTrendingResult } from '../../src/github/types.js';
+import type {
+  GitHubReadmeResult,
+  GitHubTrendingResult
+} from '../../src/github/types.js';
 
 function result(): GitHubTrendingResult {
   return {
@@ -49,6 +53,26 @@ function result(): GitHubTrendingResult {
 }
 
 describe('GitHub output', () => {
+  it('renders the complete README success envelope as JSON', () => {
+    const readme: GitHubReadmeResult = {
+      content: '# Project\n',
+      downloadUrl: 'https://raw.githubusercontent.com/example/project/main/README.md',
+      htmlUrl: 'https://github.com/example/project/blob/main/README.md',
+      name: 'README.md',
+      path: 'README.md',
+      repository: 'example/project',
+      repositoryUrl: 'https://github.com/example/project',
+      sha: '0123456789abcdef0123456789abcdef01234567',
+      size: 10,
+      sourceUrl: 'https://api.github.com/repos/example/project/readme'
+    };
+
+    expect(JSON.parse(renderGitHubReadmeAsJson(readme))).toEqual({
+      ok: true,
+      data: readme
+    });
+  });
+
   it('renders the complete success envelope as JSON', () => {
     expect(JSON.parse(renderGitHubTrendingAsJson(result()))).toEqual({
       ok: true,
