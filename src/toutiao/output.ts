@@ -1,5 +1,11 @@
 import { renderSafeTable } from '../output.js';
-import type { ToutiaoArticle, ToutiaoAuthorResult, ToutiaoListResult } from './types.js';
+import type {
+  ToutiaoArticle,
+  ToutiaoAuthStatusResult,
+  ToutiaoAuthorResult,
+  ToutiaoListResult,
+  ToutiaoPublishResult
+} from './types.js';
 
 export function renderToutiaoListAsJson(result: ToutiaoListResult): string {
   return JSON.stringify(
@@ -60,6 +66,28 @@ export function renderToutiaoAuthorAsTable(result: ToutiaoAuthorResult): string 
       item.url
     ])
   ]);
+}
+
+export function renderToutiaoAuthStatusAsJson(result: ToutiaoAuthStatusResult): string {
+  return JSON.stringify(
+    {
+      ok: true,
+      data: result
+    },
+    null,
+    2
+  );
+}
+
+export function renderToutiaoPublishResultAsJson(result: ToutiaoPublishResult): string {
+  return JSON.stringify(
+    {
+      ok: true,
+      data: result
+    },
+    null,
+    2
+  );
 }
 
 export function renderToutiaoCommandErrorAsJson(

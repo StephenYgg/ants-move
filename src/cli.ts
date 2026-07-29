@@ -22,6 +22,10 @@ import {
   registerToutiaoCommands
 } from './toutiao/command.js';
 import {
+  createDefaultToutiaoPublishRuntime,
+  type ToutiaoPublishRuntime
+} from './toutiao/publish-runtime.js';
+import {
   createDefaultToutiaoRuntime,
   type ToutiaoRuntime
 } from './toutiao/runtime.js';
@@ -46,6 +50,7 @@ export interface CreateCliOptions extends Partial<CliIo> {
     Partial<Pick<GitHubRuntime, 'fetchReadme'>>;
   hackerNewsRuntime?: HackerNewsRuntime;
   kr36Runtime?: Kr36Runtime;
+  toutiaoPublishRuntime?: ToutiaoPublishRuntime;
   toutiaoRuntime?: ToutiaoRuntime;
 }
 
@@ -89,6 +94,8 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
     stdout: io.stdout
   });
   registerToutiaoCommands(program, {
+    publishRuntime: options.toutiaoPublishRuntime
+      ?? createDefaultToutiaoPublishRuntime(),
     runtime: options.toutiaoRuntime ?? createDefaultToutiaoRuntime(),
     stderr: io.stderr,
     stdout: io.stdout

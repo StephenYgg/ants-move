@@ -82,6 +82,57 @@ export interface ToutiaoRuntimeListResult {
   source: ToutiaoSource;
 }
 
+/** Publish strategy. Default is always draft; live publish requires explicit opt-in. */
+export type ToutiaoPublishStrategy = 'draft' | 'publish';
+
+export type ToutiaoPublishContentType = 'article' | 'micro';
+
+export interface ToutiaoAuthAccount {
+  mediaId?: string;
+  name?: string;
+}
+
+export interface ToutiaoAuthStatusResult {
+  account?: ToutiaoAuthAccount;
+  loggedIn: boolean;
+  statePath: string;
+}
+
+export interface ToutiaoPublishResult {
+  account?: ToutiaoAuthAccount;
+  draftId?: string;
+  editUrl?: string;
+  itemId?: string;
+  status: 'draft_saved' | 'published' | 'dry_run';
+  strategy: ToutiaoPublishStrategy;
+  title?: string;
+  type: ToutiaoPublishContentType;
+  url?: string;
+}
+
+export interface ToutiaoArticlePublishInput {
+  category?: string;
+  claim?: string;
+  content: string;
+  coverPath?: string;
+  dryRun: boolean;
+  headed: boolean;
+  keywords: string[];
+  statePath: string;
+  strategy: ToutiaoPublishStrategy;
+  title: string;
+}
+
+export interface ToutiaoMicroPublishInput {
+  content: string;
+  dryRun: boolean;
+  headed: boolean;
+  imagePaths: string[];
+  statePath: string;
+  strategy: ToutiaoPublishStrategy;
+  topic?: string;
+}
+
 export class ToutiaoCommandError extends Error {
   constructor(
     public readonly code: string,

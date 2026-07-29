@@ -1,6 +1,6 @@
 # ants-move
 
-`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and future automation commands can move that data into forms and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub data.
+`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and automation commands can move data into creator consoles and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub data. Toutiao also supports creator-console auth and draft/publish commands for articles and micro-posts.
 
 ## Installation and requirements
 
@@ -65,6 +65,45 @@ ants toutiao author <token-or-url> [--pages 1..5] [--with-content] [--format jso
 Feed collection keeps at most the requested number of response parses active, starts at most twice that many bounded parse attempts to replace malformed responses, and accepts at most five successful responses. Each feed body is limited to 5 MB before JSON parsing and 100 raw items after parsing.
 
 Article extraction limits title, body, and paragraph text to 1 MB each. Search fallback inspection serializes at most 300 bounded links and rejects body text larger than 1 MB. `--with-content` fetches article details serially in the same browser session, accepts at most 100 unique articles, and retains at most 10 MB of article results per invocation. Toutiao can require interactive browser verification; when verification prevents usable search results, the command returns `TOUTIAO_VERIFICATION_REQUIRED`. The CLI does not attempt to bypass site verification.
+
+### Toutiao creator auth and publish
+
+These commands drive the unofficial creator console at `mp.toutiao.com` with Playwright. They are not an official Toutiao API. Account rate limits, verification challenges, and policy enforcement still apply. Use a test account first. The CLI never bypasses captchas or risk controls.
+
+Login once with a headed browser and QR scan. The session is stored as a Playwright `storageState` file (mode `0600`) at `~/.config/ants-move/toutiao/default.json` unless `--state` overrides the path:
+
+```bash
+ants toutiao auth login [--state <path>] [--timeout-ms <ms>]
+ants toutiao auth status [--state <path>]
+ants toutiao auth logout [--state <path>]
+```
+
+Create content as a **draft by default**. Live publication requires an explicit `--strategy publish`. Omitting `--strategy` always means draft. `--dry-run` validates inputs and the presence of auth state without writing to the console:
+
+```bash
+ants toutiao publish article \
+  --title <title> \
+  --content <text> | --content-file <path> \
+  [--cover <path>] \
+  [--keywords <csv>] \
+  [--category <name>] \
+  [--claim <name>] \
+  [--strategy draft|publish] \
+  [--state <path>] \
+  [--dry-run] \
+  [--headed]
+
+ants toutiao publish micro \
+  --content <text> | --content-file <path> \
+  [--images <path,path,...>] \
+  [--topic <name>] \
+  [--strategy draft|publish] \
+  [--state <path>] \
+  [--dry-run] \
+  [--headed]
+```
+
+Publish bounds: one article or one micro-post per invocation, body text at most 1 MB, at most nine micro-post images, each image at most 10 MB. The same auth state file is single-flight across processes via a lock file; concurrent holders receive `TOUTIAO_LOCK_HELD`. Save/publish is not automatically retried.
 
 ## Hacker News commands and aliases
 
