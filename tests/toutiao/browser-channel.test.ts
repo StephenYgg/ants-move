@@ -44,16 +44,20 @@ describe('Toutiao browser channel', () => {
   });
 
   it('uses channel for system browsers and omits it for chromium', () => {
-    expect(buildChromiumLaunchOptions({ browser: 'chrome', headless: false })).toEqual({
+    expect(buildChromiumLaunchOptions({ browser: 'chrome', headless: false })).toMatchObject({
       channel: 'chrome',
-      headless: false
+      headless: false,
+      args: ['--disable-blink-features=AutomationControlled']
     });
-    expect(buildChromiumLaunchOptions({ browser: 'msedge', headless: true })).toEqual({
+    expect(buildChromiumLaunchOptions({ browser: 'msedge', headless: true })).toMatchObject({
       channel: 'msedge',
       headless: true
     });
-    expect(buildChromiumLaunchOptions({ browser: 'chromium', headless: true })).toEqual({
+    expect(buildChromiumLaunchOptions({ browser: 'chromium', headless: true })).toMatchObject({
       headless: true
     });
+    expect(
+      buildChromiumLaunchOptions({ browser: 'chromium', headless: true }).channel
+    ).toBeUndefined();
   });
 });

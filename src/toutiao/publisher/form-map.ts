@@ -8,7 +8,12 @@ export const TOUTIAO_MP_HOME_URL = `${TOUTIAO_MP_ORIGIN}/`;
 export const TOUTIAO_MP_LOGIN_URL = `${TOUTIAO_MP_ORIGIN}/auth/page/login`;
 export const TOUTIAO_MEDIA_INFO_URL = `${TOUTIAO_MP_ORIGIN}/mp/agw/media/get_media_info`;
 export const TOUTIAO_ARTICLE_PUBLISH_URL = `${TOUTIAO_MP_ORIGIN}/profile_v4/graphic/publish`;
+/** Prefer an explicit "new" entry when the console supports query hints. */
+export const TOUTIAO_ARTICLE_PUBLISH_NEW_URL =
+  `${TOUTIAO_ARTICLE_PUBLISH_URL}?enter_from=ants_move_new&_ts=`;
 export const TOUTIAO_MICRO_PUBLISH_URL = `${TOUTIAO_MP_ORIGIN}/profile_v4/weitoutiao/publish`;
+export const TOUTIAO_MICRO_PUBLISH_NEW_URL =
+  `${TOUTIAO_MICRO_PUBLISH_URL}?enter_from=ants_move_new&_ts=`;
 
 /** Title field candidates on the article editor. */
 export const ARTICLE_TITLE_SELECTORS = [
@@ -23,24 +28,22 @@ export const ARTICLE_TITLE_SELECTORS = [
   '[class*="title"] input'
 ] as const;
 
-/** Body editors (contenteditable or textarea). */
+/** Body editors. Prefer ProseMirror to avoid AI side-panel textareas. */
 export const ARTICLE_CONTENT_SELECTORS = [
+  '.publish-editor .ProseMirror',
+  '.syl-editor .ProseMirror',
   '.ProseMirror[contenteditable="true"]',
-  'div.ProseMirror',
-  'div[contenteditable="true"]',
-  '[class*="editor"] [contenteditable="true"]',
-  'textarea[placeholder*="正文"]',
-  'textarea[placeholder*="内容"]'
+  'div.ProseMirror'
 ] as const;
 
 export const MICRO_CONTENT_SELECTORS = [
+  '.publish-editor .ProseMirror',
+  '.syl-editor .ProseMirror',
   '.ProseMirror[contenteditable="true"]',
   'div.ProseMirror',
-  'div[contenteditable="true"]',
   'textarea[placeholder*="分享"]',
   'textarea[placeholder*="微头条"]',
-  'textarea[placeholder*="说点什么"]',
-  '[class*="editor"] [contenteditable="true"]'
+  'textarea[placeholder*="说点什么"]'
 ] as const;
 
 export const KEYWORD_INPUT_SELECTORS = [

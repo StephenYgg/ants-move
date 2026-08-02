@@ -45,7 +45,8 @@ export function buildChromiumLaunchOptions(options: {
   headless: boolean;
 }): LaunchOptions {
   const launchOptions: LaunchOptions = {
-    headless: options.headless
+    headless: options.headless,
+    args: ['--disable-blink-features=AutomationControlled']
   };
 
   // System browsers: do not force a fake user agent; use the real browser binary.

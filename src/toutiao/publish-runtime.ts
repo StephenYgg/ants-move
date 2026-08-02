@@ -9,6 +9,7 @@ import {
 } from './browser-channel.js';
 import { isCdpEndpointReady, resolveCdpUrl } from './managed-browser.js';
 import { publishArticleOnPage } from './publisher/article.js';
+import { grantCreatorSitePermissions, TOUTIAO_SITE_PERMISSIONS } from './publisher/browser-helpers.js';
 import {
   DEFAULT_AUTH_TIMEOUT_MS,
   DEFAULT_PUBLISH_DEADLINE_MS,
@@ -114,6 +115,7 @@ async function loginWithQr(
       headless: false
     });
     context = await browser.newContext(buildContextOptions(options.browser));
+    await grantCreatorSitePermissions(context);
     const page = await context.newPage();
     await openLoginPage(page);
     const account = await waitForLogin(page, timeoutMs);
@@ -140,6 +142,7 @@ async function loginWithCdp(
   }
 ): Promise<ToutiaoAuthStatusResult> {
   const connection = await connectCdp(playwrightLoader, options.cdpUrl);
+  await grantCreatorSitePermissions(connection.context);
   const page = await connection.context.newPage();
 
   try {
@@ -218,6 +221,7 @@ async function withAuthedSession<T>(
         connectedViaCdp = true;
         const connection = await connectCdpWithPlaywright(playwright, cdpUrl);
         browser = connection.browser;
+        await grantCreatorSitePermissions(connection.context);
         ownedPage = await connection.context.newPage();
         const account = await readAccountFromPage(ownedPage);
         if (account === undefined) {
@@ -241,6 +245,7 @@ async function withAuthedSession<T>(
         ...buildContextOptions(sessionOptions.browser),
         storageState: sessionOptions.statePath
       });
+      await grantCreatorSitePermissions(ownedContext);
       ownedPage = await ownedContext.newPage();
       const account = await readAccountFromPage(ownedPage);
       if (account === undefined) {
@@ -329,17 +334,20 @@ async function connectCdpWithPlaywright(
 
 function buildContextOptions(browser: ToutiaoBrowserChannel): {
   locale: string;
+  permissions: string[];
   userAgent?: string;
 } {
+  const permissions = [...TOUTIAO_SITE_PERMISSIONS];
   if (browser === 'chromium') {
     return {
       locale: 'zh-CN',
+      permissions,
       userAgent:
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
     };
   }
 
-  return { locale: 'zh-CN' };
+  return { locale: 'zh-CN', permissions };
 }
 
 async function raceWithDeadline<T>(
