@@ -55,8 +55,10 @@ ants toutiao article <article-id-or-url> [--format json]
 Fetch one to five pages from the technology channel or a supported search keyword:
 
 ```bash
-ants toutiao list <tech|AI|光刻机|芯片|半导体> [--pages 1..5] [--format json|table] [-t]
+ants toutiao list <source> [--pages 1..5] [--format json|table] [-t]
 ```
+
+`<source>` may be `tech`, `AI`, or one of the product keyword sources used by the Toutiao console. The keyword tokens are Chinese product terms; see [README.zh-CN.md](README.zh-CN.md) for the exact spellings.
 
 Fetch an author feed by token or `/c/user/token/<token>/` profile URL:
 
@@ -129,20 +131,20 @@ ants toutiao publish micro \
 - Primary insert path: copy each image to the system clipboard and paste at a **collapsed end caret** so existing text is never selected/replaced.
 - After every insert, the CLI checks that previous paragraph fingerprints still exist. If paste would overwrite body text, the command fails with `TOUTIAO_UI_CHANGED`.
 - Fallback path: creator-console toolbar image drawer → local upload → confirm.
-- Cover / 主图 (`--cover` / `--covers`): optional. When omitted, the first body image is used for 单图. Cover upload is **best-effort**; if the cover control fails, the draft still saves with body images and may fall back to 无封面.
+- Cover image (`--cover` / `--covers`): optional. When omitted, the first body image is used as a single cover. Cover upload is **best-effort**; if the cover control fails, the draft still saves with body images and may fall back to no cover.
 
 #### Micro-post image rules
 
 - `--images` is **required** and must include **at least 2** local image paths (max 9).
-- Images are uploaded through the micro editor toolbar 图片 → 本地上传 → 确定.
+- Images are uploaded through the micro editor toolbar: Images → Local upload → Confirm.
 
 #### Other publish options
 
 | Option | Maps to console control |
 |--------|-------------------------|
-| `--topic <name>` | Micro 创作话题 (toolbar or `#topic#` text fallback) |
-| `--claim <name>` | 作品声明 checkbox label, e.g. `个人观点，仅供参考` |
-| `--first-publish` | 头条首发 (requires ≥100 content characters) |
+| `--topic <name>` | Micro topic (toolbar picker or `#topic#` text fallback) |
+| `--claim <name>` | Work-declaration checkbox label as shown in the console (exact UI text) |
+| `--first-publish` | Toutiao first-publish exclusive (requires ≥100 content characters) |
 | `--keywords <csv>` | Article keywords when the console exposes the field |
 | `--category <name>` | Article category when present |
 | `--headed` | Show the browser window while automating |
@@ -163,17 +165,17 @@ Publish bounds: one article or one micro-post per invocation; body text at most 
 ```bash
 # Article draft with 3 body images (paragraph embeds + optional cover)
 ants toutiao publish article --headed \
-  --title "示例标题" \
-  --content $'第一段内容。\n\n第二段内容。\n\n第三段内容，字数足够时可加 --first-publish。' \
+  --title "Sample title" \
+  --content $'First paragraph.\n\nSecond paragraph.\n\nThird paragraph long enough for --first-publish.' \
   --images ./a.png,./b.png,./c.png \
-  --claim "个人观点，仅供参考" \
+  --claim "Personal opinion, for reference only" \
   --first-publish
 
 # Micro draft with 2 images + topic
 ants toutiao publish micro --headed \
-  --content "微头条正文……" \
+  --content "Micro-post body text..." \
   --images ./a.png,./b.png \
-  --topic 科技
+  --topic tech
 ```
 
 ### Real managed browser profile (recommended for interactive auth/publish)
@@ -199,7 +201,7 @@ Then login / publish against that real browser via CDP:
 ants toutiao auth login --cdp http://127.0.0.1:9222
 
 # Later publishes can use the same CDP endpoint (or omit --cdp if browser start is still running)
-ants toutiao publish article --title "标题2到30字" --content "正文" --cdp http://127.0.0.1:9222
+ants toutiao publish article --title "Title 2-30 chars" --content "Body" --cdp http://127.0.0.1:9222
 ```
 
 If `ants toutiao browser start` is already running, auth/publish **auto-detect** its CDP URL when `--cdp` is omitted.
