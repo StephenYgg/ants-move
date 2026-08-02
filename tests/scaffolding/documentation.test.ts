@@ -25,6 +25,9 @@ describe('project documentation', () => {
       'ants toutiao browser start',
       'connectOverCDP',
       'draft by default',
+      'at least 3',
+      'at least 2',
+      'collapsed end caret',
       'ants hn top',
       'ants hn new',
       'ants hn best',
@@ -43,9 +46,32 @@ describe('project documentation', () => {
       'amv',
       'hackernews',
       'external bounded queue',
-      'shared rate limiter'
+      'shared rate limiter',
+      'README.zh-CN.md',
+      '[English](README.md)',
+      '[简体中文](README.zh-CN.md)'
     ]) {
       expect(readme).toContain(requiredText);
+    }
+  });
+
+  it('ships a Chinese README with language switcher and publish image rules', () => {
+    const zh = readFileSync('README.zh-CN.md', 'utf8');
+
+    for (const requiredText of [
+      '[English](README.md)',
+      '[简体中文](README.zh-CN.md)',
+      'ants toutiao publish article',
+      'ants toutiao publish micro',
+      '至少 **3**',
+      '至少 **2**',
+      '剪贴板',
+      '折叠到文末',
+      '头条首发',
+      '默认存草稿',
+      'connectOverCDP'
+    ]) {
+      expect(zh).toContain(requiredText);
     }
   });
 

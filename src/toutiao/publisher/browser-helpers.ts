@@ -70,33 +70,32 @@ export async function dismissBlockingOverlays(page: Page): Promise<void> {
     };
 
     const knownSelectors = [
-      '.byte-drawer-mask',
-      '.byte-drawer-wrapper',
+      // Only AI assistant drawers — never hide image-upload drawers (mp-ic-img-drawer).
       '.byte-drawer-wrapper.ai-assistant-drawer',
       '.ai-assistant-drawer',
+      '.ai-assistant.is-drawer',
       '.draft-tip-close-icon',
       '.draft-tip',
       '.draft-tip-wrapper',
-      '[class*="ai-assistant"]',
-      '[class*="AiAssistant"]',
-      '[class*="side-panel"]',
-      '[class*="SidePanel"]',
-      '[class*="right-panel"]',
-      '[class*="RightPanel"]',
       '[class*="zoom-panel"]',
       '[class*="ZoomPanel"]',
       '[class*="zoom-control"]',
       '[class*="scale-control"]',
       '[class*="preview-scale"]',
-      // Common ByteDance / Toutiao portal wrappers that sit over the editor.
-      '.byte-modal-wrapper',
-      '.byte-modal-mask',
       '.byte-notification-wrapper',
       '[class*="permission"]',
       '[class*="Permission"]'
     ];
     for (const selector of knownSelectors) {
       for (const node of document.querySelectorAll(selector)) {
+        // Keep image library / media drawers interactive.
+        if (
+          node.closest('.mp-ic-img-drawer')
+          || node.classList.contains('mp-ic-img-drawer')
+          || /img-drawer|image-drawer|ic-img/i.test(String(node.className))
+        ) {
+          continue;
+        }
         hide(node);
       }
     }
@@ -132,12 +131,15 @@ export async function dismissBlockingOverlays(page: Page): Promise<void> {
       if (!onRight && !topRight) {
         continue;
       }
-      // Never hide the real editor or the page footer action area.
+      // Never hide the real editor, footer actions, or image-upload drawer.
       if (
         el.closest('.ProseMirror')
         || el.classList.contains('ProseMirror')
         || el.closest('[class*="footer"]')
-        || /存草稿|发布|预览/.test(el.innerText ?? '')
+        || el.closest('.mp-ic-img-drawer')
+        || el.closest('.primary-drawer')
+        || el.classList.contains('mp-ic-img-drawer')
+        || /存草稿|发布|预览|本地上传|上传图片/.test(el.innerText ?? '')
       ) {
         continue;
       }

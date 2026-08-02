@@ -72,6 +72,11 @@ export const DEFAULT_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 export const DEFAULT_PUBLISH_DEADLINE_MS = 5 * 60 * 1000;
 export const MAX_PUBLISH_CONTENT_BYTES = 1024 * 1024;
 export const MAX_MICRO_IMAGES = 9;
+/** Product rule: micro-posts must include at least 2 images. */
+export const MIN_MICRO_IMAGES = 2;
+/** Product rule: articles must embed at least 3 body images. */
+export const MIN_ARTICLE_BODY_IMAGES = 3;
+export const MAX_ARTICLE_BODY_IMAGES = 20;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 /** Creator console title constraint: 2–30 characters. */
 export const MIN_ARTICLE_TITLE_CHARS = 2;

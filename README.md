@@ -1,5 +1,7 @@
 # ants-move
 
+**Language / 语言:** [English](README.md) · [简体中文](README.zh-CN.md)
+
 `ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and automation commands can move data into creator consoles and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub data. Toutiao also supports creator-console auth and draft/publish commands for articles and micro-posts.
 
 ## Installation and requirements
@@ -92,28 +94,87 @@ Create content as a **draft by default**. Live publication requires an explicit 
 ants toutiao publish article \
   --title <title> \
   --content <text> | --content-file <path> \
+  --images <path,path,path,...> \
   [--cover <path>] \
+  [--covers <path,path,...>] \
   [--keywords <csv>] \
   [--category <name>] \
   [--claim <name>] \
+  [--first-publish] \
   [--strategy draft|publish] \
   [--browser chrome|msedge|chromium] \
+  [--cdp <url>] \
   [--state <path>] \
   [--dry-run] \
   [--headed]
 
 ants toutiao publish micro \
   --content <text> | --content-file <path> \
-  [--images <path,path,...>] \
+  --images <path,path,...> \
   [--topic <name>] \
+  [--claim <name>] \
+  [--first-publish] \
   [--strategy draft|publish] \
   [--browser chrome|msedge|chromium] \
+  [--cdp <url>] \
   [--state <path>] \
   [--dry-run] \
   [--headed]
 ```
 
-Publish bounds: one article or one micro-post per invocation, body text at most 1 MB, article titles 2–30 characters, at most nine micro-post images, each image at most 10 MB. The same auth state file is single-flight across processes via a lock file; concurrent holders receive `TOUTIAO_LOCK_HELD`. Save/publish is not automatically retried.
+#### Article image rules
+
+- `--images` is **required** and must include **at least 3** local image paths (max 20).
+- Images are **embedded between paragraphs** in the article body (not only as the cover).
+- Primary insert path: copy each image to the system clipboard and paste at a **collapsed end caret** so existing text is never selected/replaced.
+- After every insert, the CLI checks that previous paragraph fingerprints still exist. If paste would overwrite body text, the command fails with `TOUTIAO_UI_CHANGED`.
+- Fallback path: creator-console toolbar image drawer → local upload → confirm.
+- Cover / 主图 (`--cover` / `--covers`): optional. When omitted, the first body image is used for 单图. Cover upload is **best-effort**; if the cover control fails, the draft still saves with body images and may fall back to 无封面.
+
+#### Micro-post image rules
+
+- `--images` is **required** and must include **at least 2** local image paths (max 9).
+- Images are uploaded through the micro editor toolbar 图片 → 本地上传 → 确定.
+
+#### Other publish options
+
+| Option | Maps to console control |
+|--------|-------------------------|
+| `--topic <name>` | Micro 创作话题 (toolbar or `#topic#` text fallback) |
+| `--claim <name>` | 作品声明 checkbox label, e.g. `个人观点，仅供参考` |
+| `--first-publish` | 头条首发 (requires ≥100 content characters) |
+| `--keywords <csv>` | Article keywords when the console exposes the field |
+| `--category <name>` | Article category when present |
+| `--headed` | Show the browser window while automating |
+
+#### Success criteria and bounds
+
+Draft/publish success is confirmed only when the creator save API returns a real id:
+
+- Article: `POST /mp/agw/article/publish` with `pgc_id`
+- Micro: `POST /mp/agw/draft/save_ugc_draft` with `gid`
+
+UI toasts alone are not treated as success.
+
+Publish bounds: one article or one micro-post per invocation; body text at most 1 MB; article titles 2–30 characters; article body images 3–20; micro-post images 2–9; each image at most 10 MB. The same auth state file is single-flight across processes via a lock file; concurrent holders receive `TOUTIAO_LOCK_HELD`. Save/publish is not automatically retried.
+
+#### Example
+
+```bash
+# Article draft with 3 body images (paragraph embeds + optional cover)
+ants toutiao publish article --headed \
+  --title "示例标题" \
+  --content $'第一段内容。\n\n第二段内容。\n\n第三段内容，字数足够时可加 --first-publish。' \
+  --images ./a.png,./b.png,./c.png \
+  --claim "个人观点，仅供参考" \
+  --first-publish
+
+# Micro draft with 2 images + topic
+ants toutiao publish micro --headed \
+  --content "微头条正文……" \
+  --images ./a.png,./b.png \
+  --topic 科技
+```
 
 ### Real managed browser profile (recommended for interactive auth/publish)
 

@@ -111,11 +111,17 @@ export interface ToutiaoPublishResult {
 }
 
 export interface ToutiaoArticlePublishInput {
+  /** Body images embedded between paragraphs (≥3 required). */
+  bodyImagePaths: string[];
   category?: string;
   claim?: string;
   content: string;
   coverPath?: string;
+  /** Additional cover images (with coverPath) for 三图 mode. */
+  coverPaths?: string[];
   dryRun: boolean;
+  /** Enable 头条首发 (requires ≥100 content chars). */
+  firstPublish?: boolean;
   headed: boolean;
   keywords: string[];
   statePath: string;
@@ -124,8 +130,11 @@ export interface ToutiaoArticlePublishInput {
 }
 
 export interface ToutiaoMicroPublishInput {
+  claim?: string;
   content: string;
   dryRun: boolean;
+  /** Enable 头条首发 (requires ≥100 content chars). */
+  firstPublish?: boolean;
   headed: boolean;
   imagePaths: string[];
   statePath: string;

@@ -75,6 +75,16 @@ function createPublishRuntime(sessionOverrides: Partial<ToutiaoAuthedSession> = 
   };
 }
 
+async function writeFakeImages(dir: string, count: number): Promise<string[]> {
+  const paths: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const path = join(dir, `cli-img-${index}.png`);
+    await writeFile(path, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    paths.push(path);
+  }
+  return paths;
+}
+
 describe('ants toutiao auth and publish commands', () => {
   it('logs in and prints auth status JSON', async () => {
     let stdout = '';
@@ -115,6 +125,7 @@ describe('ants toutiao auth and publish commands', () => {
     tempDirs.push(dir);
     const statePath = join(dir, 'state.json');
     await writeFile(statePath, '{}');
+    const images = await writeFakeImages(dir, 3);
     const { publishArticle, runtime } = createPublishRuntime();
     const cli = createCli({
       stdout: (value) => {
@@ -132,6 +143,8 @@ describe('ants toutiao auth and publish commands', () => {
       'Draft title',
       '--content',
       'Draft body',
+      '--images',
+      images.join(','),
       '--state',
       statePath
     ]);
@@ -146,6 +159,7 @@ describe('ants toutiao auth and publish commands', () => {
     expect(parsed.data.strategy).toBe('draft');
     expect(parsed.data.status).toBe('draft_saved');
     expect(publishArticle).toHaveBeenCalledWith(expect.objectContaining({
+      bodyImagePaths: images,
       strategy: 'draft',
       title: 'Draft title'
     }));
@@ -157,6 +171,7 @@ describe('ants toutiao auth and publish commands', () => {
     tempDirs.push(dir);
     const statePath = join(dir, 'state.json');
     await writeFile(statePath, '{}');
+    const images = await writeFakeImages(dir, 3);
     const { publishArticle, runtime } = createPublishRuntime();
     const cli = createCli({
       stdout: (value) => {
@@ -174,6 +189,8 @@ describe('ants toutiao auth and publish commands', () => {
       'Live title',
       '--content',
       'Live body',
+      '--images',
+      images.join(','),
       '--strategy',
       'publish',
       '--state',
@@ -198,6 +215,7 @@ describe('ants toutiao auth and publish commands', () => {
     tempDirs.push(dir);
     const statePath = join(dir, 'state.json');
     await writeFile(statePath, '{}');
+    const images = await writeFakeImages(dir, 2);
     const { publishMicro, runtime } = createPublishRuntime();
     const cli = createCli({
       stdout: (value) => {
@@ -213,6 +231,8 @@ describe('ants toutiao auth and publish commands', () => {
       'micro',
       '--content',
       'Hello micro',
+      '--images',
+      images.join(','),
       '--state',
       statePath
     ]);
@@ -227,6 +247,7 @@ describe('ants toutiao auth and publish commands', () => {
     expect(parsed.data.status).toBe('draft_saved');
     expect(publishMicro).toHaveBeenCalledWith(expect.objectContaining({
       content: 'Hello micro',
+      imagePaths: images,
       strategy: 'draft'
     }));
   });
@@ -261,6 +282,7 @@ describe('ants toutiao auth and publish commands', () => {
     tempDirs.push(dir);
     const statePath = join(dir, 'state.json');
     await writeFile(statePath, '{}');
+    const images = await writeFakeImages(dir, 3);
     const { publishArticle, runtime } = createPublishRuntime();
     const cli = createCli({
       stdout: (value) => {
@@ -278,6 +300,8 @@ describe('ants toutiao auth and publish commands', () => {
       'Dry title',
       '--content',
       'Dry body',
+      '--images',
+      images.join(','),
       '--dry-run',
       '--state',
       statePath

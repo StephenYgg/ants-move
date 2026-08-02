@@ -74,8 +74,11 @@ const publishArticleOptionsSchema = z.object({
   content: z.string().optional(),
   contentFile: z.string().optional(),
   cover: z.string().optional(),
+  covers: z.string().optional(),
   dryRun: z.boolean().default(false),
+  firstPublish: z.boolean().default(false),
   headed: z.boolean().default(false),
+  images: z.string().optional(),
   keywords: z.string().optional(),
   state: z.string().optional(),
   strategy: publishStrategySchema,
@@ -85,9 +88,11 @@ const publishArticleOptionsSchema = z.object({
 const publishMicroOptionsSchema = z.object({
   browser: browserChannelSchema,
   cdp: z.string().optional(),
+  claim: z.string().optional(),
   content: z.string().optional(),
   contentFile: z.string().optional(),
   dryRun: z.boolean().default(false),
+  firstPublish: z.boolean().default(false),
   headed: z.boolean().default(false),
   images: z.string().optional(),
   state: z.string().optional(),
@@ -255,10 +260,13 @@ function registerPublishCommands(
     .requiredOption('--title <title>', 'article title')
     .option('--content <text>', 'article body text')
     .option('--content-file <path>', 'read article body from a file')
-    .option('--cover <path>', 'local cover image path')
+    .option('--images <paths>', 'comma-separated body images embedded in paragraphs (min 3)')
+    .option('--cover <path>', 'local cover image path (单图主图; defaults to first body image)')
+    .option('--covers <paths>', 'comma-separated cover images (up to 3 for 三图)')
     .option('--keywords <csv>', 'comma-separated keywords/tags')
     .option('--category <name>', 'category label as shown in the creator console')
-    .option('--claim <name>', 'declaration/claim label as shown in the creator console')
+    .option('--claim <name>', '作品声明 label as shown in the creator console')
+    .option('--first-publish', 'enable 头条首发 (requires ≥100 content characters)')
     .option(
       '--strategy <strategy>',
       'draft (default) or publish (explicit live submit)',
@@ -285,8 +293,10 @@ function registerPublishCommands(
     .description('Create a micro-post draft (default) or publish with --strategy publish.')
     .option('--content <text>', 'micro-post body text')
     .option('--content-file <path>', 'read micro-post body from a file')
-    .option('--images <paths>', 'comma-separated local image paths (max 9)')
-    .option('--topic <name>', 'optional topic/hashtag without requiring # wrappers')
+    .option('--images <paths>', 'comma-separated local image paths (min 2, max 9)')
+    .option('--topic <name>', '创作话题 / hashtag without requiring # wrappers')
+    .option('--claim <name>', '作品声明 label as shown in the creator console')
+    .option('--first-publish', 'enable 头条首发 (requires ≥100 content characters)')
     .option(
       '--strategy <strategy>',
       'draft (default) or publish (explicit live submit)',
@@ -358,11 +368,14 @@ function buildArticlePublishRequest(
   parsed: z.infer<typeof publishArticleOptionsSchema>
 ): Parameters<ToutiaoPublishService['publishArticle']>[0] {
   const keywords = parseKeywords(parsed.keywords);
+  const covers = parseImageList(parsed.covers);
+  const images = parseImageList(parsed.images);
   return {
     title: parsed.title,
     dryRun: parsed.dryRun,
     headed: parsed.headed,
     strategy: parsed.strategy,
+    firstPublish: parsed.firstPublish,
     ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
     ...(parsed.cdp === undefined ? {} : { cdpUrl: parsed.cdp }),
     ...(parsed.category === undefined ? {} : { category: parsed.category }),
@@ -370,6 +383,8 @@ function buildArticlePublishRequest(
     ...(parsed.content === undefined ? {} : { content: parsed.content }),
     ...(parsed.contentFile === undefined ? {} : { contentFile: parsed.contentFile }),
     ...(parsed.cover === undefined ? {} : { cover: parsed.cover }),
+    ...(covers === undefined ? {} : { covers }),
+    ...(images === undefined ? {} : { images }),
     ...(keywords === undefined ? {} : { keywords }),
     ...(parsed.state === undefined ? {} : { statePath: parsed.state })
   };
@@ -383,8 +398,10 @@ function buildMicroPublishRequest(
     dryRun: parsed.dryRun,
     headed: parsed.headed,
     strategy: parsed.strategy,
+    firstPublish: parsed.firstPublish,
     ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
     ...(parsed.cdp === undefined ? {} : { cdpUrl: parsed.cdp }),
+    ...(parsed.claim === undefined ? {} : { claim: parsed.claim }),
     ...(parsed.content === undefined ? {} : { content: parsed.content }),
     ...(parsed.contentFile === undefined ? {} : { contentFile: parsed.contentFile }),
     ...(images === undefined ? {} : { images }),

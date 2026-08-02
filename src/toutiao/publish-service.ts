@@ -3,12 +3,19 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolveToutiaoBrowserChannel } from './browser-channel.js';
 import type { ToutiaoPublishRuntime } from './publish-runtime.js';
 import {
+  MAX_ARTICLE_BODY_IMAGES,
   MAX_ARTICLE_TITLE_CHARS,
   MAX_IMAGE_BYTES,
   MAX_MICRO_IMAGES,
   MAX_PUBLISH_CONTENT_BYTES,
-  MIN_ARTICLE_TITLE_CHARS
+  MIN_ARTICLE_BODY_IMAGES,
+  MIN_ARTICLE_TITLE_CHARS,
+  MIN_MICRO_IMAGES
 } from './publisher/form-map.js';
+import {
+  countContentChars,
+  MIN_FIRST_PUBLISH_CONTENT_CHARS
+} from './publisher/form-options.js';
 import { resolveToutiaoStatePath, stateFileExists, withToutiaoStateLock } from './state.js';
 import {
   ToutiaoCommandError,
@@ -31,8 +38,12 @@ export class ToutiaoPublishService {
     content?: string;
     contentFile?: string;
     cover?: string;
+    covers?: string[];
     dryRun?: boolean;
+    firstPublish?: boolean;
     headed?: boolean;
+    /** Body images embedded in paragraphs (≥3 required). */
+    images?: string[];
     keywords?: string[];
     statePath?: string;
     strategy?: ToutiaoPublishStrategy;
@@ -41,6 +52,7 @@ export class ToutiaoPublishService {
     const strategy = input.strategy ?? 'draft';
     const dryRun = input.dryRun ?? false;
     const headed = input.headed ?? false;
+    const firstPublish = input.firstPublish ?? false;
     const browser = resolveToutiaoBrowserChannel(input.browser);
     const statePath = resolveToutiaoStatePath(input.statePath);
     const content = await resolveContent({
@@ -49,6 +61,8 @@ export class ToutiaoPublishService {
     });
     const keywords = input.keywords ?? [];
     const title = input.title.trim();
+    const coverPaths = input.covers ?? [];
+    const bodyImagePaths = input.images ?? [];
 
     if (title === '') {
       throw invalidInput('Article title must not be empty.');
@@ -67,8 +81,37 @@ export class ToutiaoPublishService {
     }
 
     assertContentSize(content, 'article body');
+    if (firstPublish) {
+      assertFirstPublishLength(content);
+    }
+
+    if (bodyImagePaths.length < MIN_ARTICLE_BODY_IMAGES) {
+      throw invalidInput(
+        `Article requires at least ${MIN_ARTICLE_BODY_IMAGES} body images embedded in paragraphs.`,
+        { min: MIN_ARTICLE_BODY_IMAGES, provided: bodyImagePaths.length }
+      );
+    }
+    if (bodyImagePaths.length > MAX_ARTICLE_BODY_IMAGES) {
+      throw invalidInput(
+        `Article supports at most ${MAX_ARTICLE_BODY_IMAGES} body images.`,
+        { max: MAX_ARTICLE_BODY_IMAGES, provided: bodyImagePaths.length }
+      );
+    }
+    for (const imagePath of bodyImagePaths) {
+      await assertImageFile(imagePath, 'article body image');
+    }
+
     if (input.cover !== undefined) {
       await assertImageFile(input.cover, 'cover image');
+    }
+    for (const coverPath of coverPaths) {
+      await assertImageFile(coverPath, 'cover image');
+    }
+    if (coverPaths.length > 3) {
+      throw invalidInput('Article supports at most 3 cover images (三图).', {
+        max: 3,
+        provided: coverPaths.length
+      });
     }
 
     if (dryRun) {
@@ -90,13 +133,16 @@ export class ToutiaoPublishService {
           ...(input.cdpUrl === undefined ? {} : { cdpUrl: input.cdpUrl })
         },
         async (session) => session.publishArticle({
+          bodyImagePaths,
           content,
           keywords,
           strategy,
           title,
+          firstPublish,
           ...(input.category === undefined ? {} : { category: input.category }),
           ...(input.claim === undefined ? {} : { claim: input.claim }),
-          ...(input.cover === undefined ? {} : { coverPath: input.cover })
+          ...(input.cover === undefined ? {} : { coverPath: input.cover }),
+          ...(coverPaths.length === 0 ? {} : { coverPaths })
         })
       )
     );
@@ -105,9 +151,11 @@ export class ToutiaoPublishService {
   async publishMicro(input: {
     browser?: string;
     cdpUrl?: string;
+    claim?: string;
     content?: string;
     contentFile?: string;
     dryRun?: boolean;
+    firstPublish?: boolean;
     headed?: boolean;
     images?: string[];
     statePath?: string;
@@ -117,6 +165,7 @@ export class ToutiaoPublishService {
     const strategy = input.strategy ?? 'draft';
     const dryRun = input.dryRun ?? false;
     const headed = input.headed ?? false;
+    const firstPublish = input.firstPublish ?? false;
     const browser = resolveToutiaoBrowserChannel(input.browser);
     const statePath = resolveToutiaoStatePath(input.statePath);
     const content = await resolveContent({
@@ -130,6 +179,15 @@ export class ToutiaoPublishService {
     }
 
     assertContentSize(content, 'micro-post body');
+    if (firstPublish) {
+      assertFirstPublishLength(content);
+    }
+    if (imagePaths.length < MIN_MICRO_IMAGES) {
+      throw invalidInput(
+        `Micro-post requires at least ${MIN_MICRO_IMAGES} images.`,
+        { minImages: MIN_MICRO_IMAGES, provided: imagePaths.length }
+      );
+    }
     if (imagePaths.length > MAX_MICRO_IMAGES) {
       throw invalidInput(
         `Micro-post supports at most ${MAX_MICRO_IMAGES} images.`,
@@ -162,9 +220,21 @@ export class ToutiaoPublishService {
           content,
           imagePaths,
           strategy,
+          firstPublish,
+          ...(input.claim === undefined ? {} : { claim: input.claim }),
           ...(input.topic === undefined ? {} : { topic: input.topic })
         })
       )
+    );
+  }
+}
+
+function assertFirstPublishLength(content: string): void {
+  const chars = countContentChars(content);
+  if (chars < MIN_FIRST_PUBLISH_CONTENT_CHARS) {
+    throw invalidInput(
+      `头条首发 requires at least ${MIN_FIRST_PUBLISH_CONTENT_CHARS} content characters (got ${chars}).`,
+      { min: MIN_FIRST_PUBLISH_CONTENT_CHARS, provided: chars }
     );
   }
 }
