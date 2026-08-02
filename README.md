@@ -70,11 +70,19 @@ Article extraction limits title, body, and paragraph text to 1 MB each. Search f
 
 These commands drive the unofficial creator console at `mp.toutiao.com` with Playwright. They are not an official Toutiao API. Account rate limits, verification challenges, and policy enforcement still apply. Use a test account first. The CLI never bypasses captchas or risk controls.
 
-Login once with a headed browser and QR scan. The session is stored as a Playwright `storageState` file (mode `0600`) at `~/.config/ants-move/toutiao/default.json` unless `--state` overrides the path:
+Login once with a headed browser and QR scan. The session is stored as a Playwright `storageState` file (mode `0600`) at `~/.config/ants-move/toutiao/default.json` unless `--state` overrides the path.
+
+Auth and publish default to your **installed system browser** (`--browser chrome`), not Playwright's Chromium for Testing. Supported channels:
+
+- `chrome` (default): Google Chrome installed on the machine
+- `msedge`: Microsoft Edge
+- `chromium`: Playwright-managed Chromium for Testing
+
+You can also set `ANTS_TOUTIAO_BROWSER=chrome|msedge|chromium`.
 
 ```bash
-ants toutiao auth login [--state <path>] [--timeout-ms <ms>]
-ants toutiao auth status [--state <path>]
+ants toutiao auth login [--browser chrome|msedge|chromium] [--state <path>] [--timeout-ms <ms>]
+ants toutiao auth status [--browser chrome|msedge|chromium] [--state <path>]
 ants toutiao auth logout [--state <path>]
 ```
 
@@ -89,6 +97,7 @@ ants toutiao publish article \
   [--category <name>] \
   [--claim <name>] \
   [--strategy draft|publish] \
+  [--browser chrome|msedge|chromium] \
   [--state <path>] \
   [--dry-run] \
   [--headed]
@@ -98,12 +107,43 @@ ants toutiao publish micro \
   [--images <path,path,...>] \
   [--topic <name>] \
   [--strategy draft|publish] \
+  [--browser chrome|msedge|chromium] \
   [--state <path>] \
   [--dry-run] \
   [--headed]
 ```
 
-Publish bounds: one article or one micro-post per invocation, body text at most 1 MB, at most nine micro-post images, each image at most 10 MB. The same auth state file is single-flight across processes via a lock file; concurrent holders receive `TOUTIAO_LOCK_HELD`. Save/publish is not automatically retried.
+Publish bounds: one article or one micro-post per invocation, body text at most 1 MB, article titles 2–30 characters, at most nine micro-post images, each image at most 10 MB. The same auth state file is single-flight across processes via a lock file; concurrent holders receive `TOUTIAO_LOCK_HELD`. Save/publish is not automatically retried.
+
+### Real managed browser profile (recommended for interactive auth/publish)
+
+To drive a **real Chrome/Edge** with a **dedicated automation profile** (not your daily Chrome profile), start a debuggable browser once:
+
+```bash
+ants toutiao browser start [--browser chrome|msedge] [--port 9222] [--profile <path>]
+ants toutiao browser status
+ants toutiao browser stop
+```
+
+Defaults:
+
+- Profile: `~/.config/ants-move/toutiao/chrome-profile`
+- CDP: `http://127.0.0.1:9222`
+- Meta: `~/.config/ants-move/toutiao/browser.json`
+
+Then login / publish against that real browser via CDP:
+
+```bash
+# In the managed Chrome window, scan QR if needed
+ants toutiao auth login --cdp http://127.0.0.1:9222
+
+# Later publishes can use the same CDP endpoint (or omit --cdp if browser start is still running)
+ants toutiao publish article --title "标题2到30字" --content "正文" --cdp http://127.0.0.1:9222
+```
+
+If `ants toutiao browser start` is already running, auth/publish **auto-detect** its CDP URL when `--cdp` is omitted.
+
+This is Playwright `connectOverCDP` against a real installed Chrome/Edge process. It does **not** reuse your personal daily Chrome profile under `~/Library/Application Support/Google/Chrome`.
 
 ## Hacker News commands and aliases
 

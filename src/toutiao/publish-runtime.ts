@@ -1,6 +1,13 @@
 import { chmod } from 'node:fs/promises';
 import type { Browser, BrowserContext, Page } from 'playwright';
 
+import {
+  DEFAULT_TOUTIAO_BROWSER_CHANNEL,
+  launchToutiaoBrowser,
+  resolveToutiaoBrowserChannel,
+  type ToutiaoBrowserChannel
+} from './browser-channel.js';
+import { isCdpEndpointReady, resolveCdpUrl } from './managed-browser.js';
 import { publishArticleOnPage } from './publisher/article.js';
 import {
   DEFAULT_AUTH_TIMEOUT_MS,
@@ -20,9 +27,6 @@ import {
   type ToutiaoPublishResult
 } from './types.js';
 
-const TOUTIAO_USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-
 export interface ToutiaoAuthedSession {
   getStatus: () => Promise<ToutiaoAuthStatusResult>;
   publishArticle: (
@@ -35,11 +39,15 @@ export interface ToutiaoAuthedSession {
 
 export interface ToutiaoPublishRuntime {
   loginWithQr: (options: {
+    browser?: ToutiaoBrowserChannel;
+    cdpUrl?: string;
     statePath: string;
     timeoutMs?: number;
   }) => Promise<ToutiaoAuthStatusResult>;
   withAuthedSession: <T>(
     options: {
+      browser?: ToutiaoBrowserChannel;
+      cdpUrl?: string;
       headed?: boolean;
       statePath: string;
       deadlineMs?: number;
@@ -49,6 +57,7 @@ export interface ToutiaoPublishRuntime {
 }
 
 export interface ToutiaoPublishRuntimeOptions {
+  defaultBrowser?: ToutiaoBrowserChannel;
   loadPlaywright?: () => Promise<typeof import('playwright')>;
 }
 
@@ -58,33 +67,53 @@ export function createDefaultToutiaoPublishRuntime(
   options: ToutiaoPublishRuntimeOptions = {}
 ): ToutiaoPublishRuntime {
   const playwrightLoader = options.loadPlaywright ?? loadPlaywright;
+  const defaultBrowser = options.defaultBrowser
+    ?? resolveToutiaoBrowserChannel();
 
   return {
-    loginWithQr: (loginOptions) => loginWithQr(playwrightLoader, loginOptions),
+    loginWithQr: (loginOptions) => loginWithQr(playwrightLoader, {
+      ...loginOptions,
+      browser: loginOptions.browser ?? defaultBrowser
+    }),
     withAuthedSession: (sessionOptions, operation) =>
-      withAuthedSession(playwrightLoader, sessionOptions, operation)
+      withAuthedSession(playwrightLoader, {
+        ...sessionOptions,
+        browser: sessionOptions.browser ?? defaultBrowser
+      }, operation)
   };
 }
 
 async function loginWithQr(
   playwrightLoader: PlaywrightLoader,
   options: {
+    browser: ToutiaoBrowserChannel;
+    cdpUrl?: string;
     statePath: string;
     timeoutMs?: number;
   }
 ): Promise<ToutiaoAuthStatusResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS;
   await ensureStateDirectory(options.statePath);
+
+  const cdpUrl = await resolveOptionalCdpUrl(options.cdpUrl);
+  if (cdpUrl !== undefined) {
+    return loginWithCdp(playwrightLoader, {
+      cdpUrl,
+      statePath: options.statePath,
+      timeoutMs
+    });
+  }
+
   let browser: Browser | undefined;
   let context: BrowserContext | undefined;
 
   try {
     const playwright = await loadPlaywrightOrThrow(playwrightLoader);
-    browser = await launchChromiumOrThrow(playwright, false);
-    context = await browser.newContext({
-      locale: 'zh-CN',
-      userAgent: TOUTIAO_USER_AGENT
+    browser = await launchToutiaoBrowser(playwright, {
+      browser: options.browser,
+      headless: false
     });
+    context = await browser.newContext(buildContextOptions(options.browser));
     const page = await context.newPage();
     await openLoginPage(page);
     const account = await waitForLogin(page, timeoutMs);
@@ -99,6 +128,34 @@ async function loginWithQr(
   } finally {
     await context?.close().catch(() => undefined);
     await browser?.close().catch(() => undefined);
+  }
+}
+
+async function loginWithCdp(
+  playwrightLoader: PlaywrightLoader,
+  options: {
+    cdpUrl: string;
+    statePath: string;
+    timeoutMs: number;
+  }
+): Promise<ToutiaoAuthStatusResult> {
+  const connection = await connectCdp(playwrightLoader, options.cdpUrl);
+  const page = await connection.context.newPage();
+
+  try {
+    await openLoginPage(page);
+    const account = await waitForLogin(page, options.timeoutMs);
+    await connection.context.storageState({ path: options.statePath });
+    await chmod(options.statePath, 0o600);
+
+    return {
+      account,
+      loggedIn: true,
+      statePath: options.statePath
+    };
+  } finally {
+    await page.close().catch(() => undefined);
+    await connection.browser.close().catch(() => undefined);
   }
 }
 
@@ -119,16 +176,20 @@ async function openLoginPage(page: Page): Promise<void> {
 async function withAuthedSession<T>(
   playwrightLoader: PlaywrightLoader,
   sessionOptions: {
+    browser: ToutiaoBrowserChannel;
+    cdpUrl?: string;
     headed?: boolean;
     statePath: string;
     deadlineMs?: number;
   },
   operation: (session: ToutiaoAuthedSession) => Promise<T>
 ): Promise<T> {
-  if (!(await stateFileExists(sessionOptions.statePath))) {
+  const cdpUrl = await resolveOptionalCdpUrl(sessionOptions.cdpUrl);
+
+  if (cdpUrl === undefined && !(await stateFileExists(sessionOptions.statePath))) {
     throw new ToutiaoCommandError(
       'TOUTIAO_AUTH_REQUIRED',
-      'Toutiao auth state file is missing. Run `ants toutiao auth login` first.',
+      'Toutiao auth state file is missing. Run `ants toutiao auth login` first, or start a managed browser: ants toutiao browser start',
       2,
       { statePath: sessionOptions.statePath }
     );
@@ -137,8 +198,10 @@ async function withAuthedSession<T>(
   const deadlineMs = sessionOptions.deadlineMs ?? DEFAULT_PUBLISH_DEADLINE_MS;
   const headed = sessionOptions.headed ?? false;
   let browser: Browser | undefined;
-  let context: BrowserContext | undefined;
+  let ownedContext: BrowserContext | undefined;
+  let ownedPage: Page | undefined;
   let deadlineTriggered = false;
+  let connectedViaCdp = false;
 
   const createTimeoutError = () => new ToutiaoCommandError(
     'TOUTIAO_TIMEOUT',
@@ -147,20 +210,61 @@ async function withAuthedSession<T>(
     { deadlineMs }
   );
 
-  const lifecycle = runAuthedLifecycle({
-    headed,
-    getBrowser: () => browser,
-    setBrowser: (value) => {
-      browser = value;
-    },
-    getContext: () => context,
-    setContext: (value) => {
-      context = value;
-    },
-    operation,
-    playwrightLoader,
-    statePath: sessionOptions.statePath
-  });
+  const lifecycle = (async () => {
+    try {
+      const playwright = await loadPlaywrightOrThrow(playwrightLoader);
+
+      if (cdpUrl !== undefined) {
+        connectedViaCdp = true;
+        const connection = await connectCdpWithPlaywright(playwright, cdpUrl);
+        browser = connection.browser;
+        ownedPage = await connection.context.newPage();
+        const account = await readAccountFromPage(ownedPage);
+        if (account === undefined) {
+          throw new ToutiaoCommandError(
+            'TOUTIAO_AUTH_EXPIRED',
+            'Connected browser session is not logged in to the Toutiao creator console. Scan login in that browser, or run auth login --cdp.',
+            2,
+            { cdpUrl }
+          );
+        }
+        return await operation(
+          createAuthedSession(ownedPage, account, sessionOptions.statePath)
+        );
+      }
+
+      browser = await launchToutiaoBrowser(playwright, {
+        browser: sessionOptions.browser,
+        headless: !headed
+      });
+      ownedContext = await browser.newContext({
+        ...buildContextOptions(sessionOptions.browser),
+        storageState: sessionOptions.statePath
+      });
+      ownedPage = await ownedContext.newPage();
+      const account = await readAccountFromPage(ownedPage);
+      if (account === undefined) {
+        throw new ToutiaoCommandError(
+          'TOUTIAO_AUTH_EXPIRED',
+          'Toutiao auth state is present but the creator session is invalid. Run `ants toutiao auth login` again.',
+          2,
+          { statePath: sessionOptions.statePath }
+        );
+      }
+
+      return await operation(
+        createAuthedSession(ownedPage, account, sessionOptions.statePath)
+      );
+    } finally {
+      await ownedPage?.close().catch(() => undefined);
+      if (!connectedViaCdp) {
+        await ownedContext?.close().catch(() => undefined);
+      }
+      // CDP: close() disconnects and leaves the real browser running.
+      // Launch mode: close() shuts down the temporary browser.
+      await browser?.close().catch(() => undefined);
+    }
+  })();
 
   return await raceWithDeadline(lifecycle, deadlineMs, () => {
     deadlineTriggered = true;
@@ -169,44 +273,73 @@ async function withAuthedSession<T>(
   }, () => deadlineTriggered);
 }
 
-async function runAuthedLifecycle<T>(options: {
-  headed: boolean;
-  getBrowser: () => Browser | undefined;
-  setBrowser: (browser: Browser | undefined) => void;
-  getContext: () => BrowserContext | undefined;
-  setContext: (context: BrowserContext | undefined) => void;
-  operation: (session: ToutiaoAuthedSession) => Promise<T>;
-  playwrightLoader: PlaywrightLoader;
-  statePath: string;
-}): Promise<T> {
-  try {
-    const playwright = await loadPlaywrightOrThrow(options.playwrightLoader);
-    const browser = await launchChromiumOrThrow(playwright, !options.headed);
-    options.setBrowser(browser);
-    const context = await browser.newContext({
-      locale: 'zh-CN',
-      storageState: options.statePath,
-      userAgent: TOUTIAO_USER_AGENT
-    });
-    options.setContext(context);
-    const page = await context.newPage();
-    const account = await readAccountFromPage(page);
-    if (account === undefined) {
+async function resolveOptionalCdpUrl(explicit?: string): Promise<string | undefined> {
+  if (explicit !== undefined && explicit.trim() !== '') {
+    const cdpUrl = explicit.trim().replace(/\/$/, '');
+    if (!(await isCdpEndpointReady(cdpUrl))) {
       throw new ToutiaoCommandError(
-        'TOUTIAO_AUTH_EXPIRED',
-        'Toutiao auth state is present but the creator session is invalid. Run `ants toutiao auth login` again.',
-        2,
-        { statePath: options.statePath }
+        'TOUTIAO_CDP_UNAVAILABLE',
+        `CDP endpoint is not reachable at ${cdpUrl}. Start it with: ants toutiao browser start`,
+        1,
+        { cdpUrl }
       );
     }
-
-    return await options.operation(
-      createAuthedSession(page, account, options.statePath)
-    );
-  } finally {
-    await options.getContext()?.close().catch(() => undefined);
-    await options.getBrowser()?.close().catch(() => undefined);
+    return cdpUrl;
   }
+
+  // Auto-use managed browser from `ants toutiao browser start` when available.
+  return resolveCdpUrl();
+}
+
+async function connectCdp(
+  playwrightLoader: PlaywrightLoader,
+  cdpUrl: string
+): Promise<{ browser: Browser; context: BrowserContext }> {
+  const playwright = await loadPlaywrightOrThrow(playwrightLoader);
+  return connectCdpWithPlaywright(playwright, cdpUrl);
+}
+
+async function connectCdpWithPlaywright(
+  playwright: typeof import('playwright'),
+  cdpUrl: string
+): Promise<{ browser: Browser; context: BrowserContext }> {
+  if (!(await isCdpEndpointReady(cdpUrl))) {
+    throw new ToutiaoCommandError(
+      'TOUTIAO_CDP_UNAVAILABLE',
+      `CDP endpoint is not reachable at ${cdpUrl}. Start it with: ants toutiao browser start`,
+      1,
+      { cdpUrl }
+    );
+  }
+
+  try {
+    const browser = await playwright.chromium.connectOverCDP(cdpUrl);
+    const context = browser.contexts()[0] ?? await browser.newContext();
+    return { browser, context };
+  } catch (error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    throw new ToutiaoCommandError(
+      'TOUTIAO_CDP_UNAVAILABLE',
+      `Failed to connect to browser over CDP at ${cdpUrl}.`,
+      1,
+      { cdpUrl, cause }
+    );
+  }
+}
+
+function buildContextOptions(browser: ToutiaoBrowserChannel): {
+  locale: string;
+  userAgent?: string;
+} {
+  if (browser === 'chromium') {
+    return {
+      locale: 'zh-CN',
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+    };
+  }
+
+  return { locale: 'zh-CN' };
 }
 
 async function raceWithDeadline<T>(
@@ -355,21 +488,8 @@ async function loadPlaywrightOrThrow(
   }
 }
 
-async function launchChromiumOrThrow(
-  playwright: typeof import('playwright'),
-  headless: boolean
-): Promise<Browser> {
-  try {
-    return await playwright.chromium.launch({ headless });
-  } catch {
-    throw new ToutiaoCommandError(
-      'TOUTIAO_BROWSER_UNAVAILABLE',
-      'Toutiao publish requires Playwright Chromium to be installed.',
-      2
-    );
-  }
-}
-
 async function loadPlaywright(): Promise<typeof import('playwright')> {
   return import('playwright');
 }
+
+export { DEFAULT_TOUTIAO_BROWSER_CHANNEL };

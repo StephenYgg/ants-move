@@ -1,10 +1,13 @@
 import { readFile, stat } from 'node:fs/promises';
 
+import { resolveToutiaoBrowserChannel } from './browser-channel.js';
 import type { ToutiaoPublishRuntime } from './publish-runtime.js';
 import {
+  MAX_ARTICLE_TITLE_CHARS,
   MAX_IMAGE_BYTES,
   MAX_MICRO_IMAGES,
-  MAX_PUBLISH_CONTENT_BYTES
+  MAX_PUBLISH_CONTENT_BYTES,
+  MIN_ARTICLE_TITLE_CHARS
 } from './publisher/form-map.js';
 import { resolveToutiaoStatePath, stateFileExists, withToutiaoStateLock } from './state.js';
 import {
@@ -21,7 +24,9 @@ export class ToutiaoPublishService {
   constructor(private readonly dependencies: ToutiaoPublishServiceDependencies) {}
 
   async publishArticle(input: {
+    browser?: string;
     category?: string;
+    cdpUrl?: string;
     claim?: string;
     content?: string;
     contentFile?: string;
@@ -36,6 +41,7 @@ export class ToutiaoPublishService {
     const strategy = input.strategy ?? 'draft';
     const dryRun = input.dryRun ?? false;
     const headed = input.headed ?? false;
+    const browser = resolveToutiaoBrowserChannel(input.browser);
     const statePath = resolveToutiaoStatePath(input.statePath);
     const content = await resolveContent({
       ...(input.content === undefined ? {} : { content: input.content }),
@@ -46,6 +52,18 @@ export class ToutiaoPublishService {
 
     if (title === '') {
       throw invalidInput('Article title must not be empty.');
+    }
+
+    const titleChars = Array.from(title).length;
+    if (titleChars < MIN_ARTICLE_TITLE_CHARS || titleChars > MAX_ARTICLE_TITLE_CHARS) {
+      throw invalidInput(
+        `Article title must be between ${MIN_ARTICLE_TITLE_CHARS} and ${MAX_ARTICLE_TITLE_CHARS} characters.`,
+        {
+          length: titleChars,
+          max: MAX_ARTICLE_TITLE_CHARS,
+          min: MIN_ARTICLE_TITLE_CHARS
+        }
+      );
     }
 
     assertContentSize(content, 'article body');
@@ -65,7 +83,12 @@ export class ToutiaoPublishService {
 
     return withToutiaoStateLock(statePath, async () =>
       this.dependencies.publishRuntime.withAuthedSession(
-        { statePath, headed },
+        {
+          browser,
+          statePath,
+          headed,
+          ...(input.cdpUrl === undefined ? {} : { cdpUrl: input.cdpUrl })
+        },
         async (session) => session.publishArticle({
           content,
           keywords,
@@ -80,6 +103,8 @@ export class ToutiaoPublishService {
   }
 
   async publishMicro(input: {
+    browser?: string;
+    cdpUrl?: string;
     content?: string;
     contentFile?: string;
     dryRun?: boolean;
@@ -92,6 +117,7 @@ export class ToutiaoPublishService {
     const strategy = input.strategy ?? 'draft';
     const dryRun = input.dryRun ?? false;
     const headed = input.headed ?? false;
+    const browser = resolveToutiaoBrowserChannel(input.browser);
     const statePath = resolveToutiaoStatePath(input.statePath);
     const content = await resolveContent({
       ...(input.content === undefined ? {} : { content: input.content }),
@@ -126,7 +152,12 @@ export class ToutiaoPublishService {
 
     return withToutiaoStateLock(statePath, async () =>
       this.dependencies.publishRuntime.withAuthedSession(
-        { statePath, headed },
+        {
+          browser,
+          statePath,
+          headed,
+          ...(input.cdpUrl === undefined ? {} : { cdpUrl: input.cdpUrl })
+        },
         async (session) => session.publishMicro({
           content,
           imagePaths,

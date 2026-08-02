@@ -3,6 +3,11 @@ import { z } from 'zod';
 
 import { ToutiaoAuthService } from './auth.js';
 import {
+  startManagedBrowser,
+  statusManagedBrowser,
+  stopManagedBrowser
+} from './managed-browser.js';
+import {
   renderToutiaoArticleAsJson,
   renderToutiaoAuthStatusAsJson,
   renderToutiaoAuthorAsJson,
@@ -10,6 +15,7 @@ import {
   renderToutiaoCommandErrorAsJson,
   renderToutiaoListAsJson,
   renderToutiaoListAsTable,
+  renderToutiaoManagedBrowserAsJson,
   renderToutiaoPublishResultAsJson
 } from './output.js';
 import type { ToutiaoPublishRuntime } from './publish-runtime.js';
@@ -43,19 +49,27 @@ const authorOptionsSchema = z.object({
   withContent: z.boolean().default(false)
 });
 
+const browserChannelSchema = z.enum(['chrome', 'msedge', 'chromium']).optional();
+
 const authLoginOptionsSchema = z.object({
+  browser: browserChannelSchema,
+  cdp: z.string().optional(),
   state: z.string().optional(),
   timeoutMs: z.number().int().positive().default(5 * 60 * 1000)
 });
 
 const authStateOptionsSchema = z.object({
+  browser: browserChannelSchema,
+  cdp: z.string().optional(),
   state: z.string().optional()
 });
 
 const publishStrategySchema = z.enum(['draft', 'publish']).default('draft');
 
 const publishArticleOptionsSchema = z.object({
+  browser: browserChannelSchema,
   category: z.string().optional(),
+  cdp: z.string().optional(),
   claim: z.string().optional(),
   content: z.string().optional(),
   contentFile: z.string().optional(),
@@ -69,6 +83,8 @@ const publishArticleOptionsSchema = z.object({
 });
 
 const publishMicroOptionsSchema = z.object({
+  browser: browserChannelSchema,
+  cdp: z.string().optional(),
   content: z.string().optional(),
   contentFile: z.string().optional(),
   dryRun: z.boolean().default(false),
@@ -77,6 +93,12 @@ const publishMicroOptionsSchema = z.object({
   state: z.string().optional(),
   strategy: publishStrategySchema,
   topic: z.string().optional()
+});
+
+const managedBrowserStartSchema = z.object({
+  browser: z.enum(['chrome', 'msedge']).default('chrome'),
+  port: z.number().int().min(1).max(65_535).default(9222),
+  profile: z.string().optional()
 });
 
 export function registerToutiaoCommands(
@@ -94,6 +116,7 @@ export function registerToutiaoCommands(
   registerCollectorCommands(toutiao, service, dependencies);
   registerAuthCommands(toutiao, authService, dependencies);
   registerPublishCommands(toutiao, publishService, dependencies);
+  registerManagedBrowserCommands(toutiao, dependencies);
 }
 
 function registerCollectorCommands(
@@ -158,14 +181,24 @@ function registerAuthCommands(
 
   auth.command('login')
     .description('Open a headed browser, scan the QR code once, and save storageState.')
+    .option(
+      '--browser <browser>',
+      'browser channel: chrome (default), msedge, or chromium',
+      'chrome'
+    )
+    .option('--cdp <url>', 'connect to an existing browser via CDP (e.g. http://127.0.0.1:9222)')
     .option('--state <path>', 'Playwright storageState path')
     .option('--timeout-ms <ms>', 'QR login timeout in milliseconds', parsePositiveInt, 5 * 60 * 1000)
     .action(async (options) => {
       const parsed = authLoginOptionsSchema.parse({
+        ...(options.browser === undefined ? {} : { browser: options.browser }),
+        ...(options.cdp === undefined ? {} : { cdp: options.cdp }),
         ...(options.state === undefined ? {} : { state: options.state }),
         timeoutMs: options.timeoutMs
       });
       const result = await authService.login({
+        ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
+        ...(parsed.cdp === undefined ? {} : { cdpUrl: parsed.cdp }),
         ...(parsed.state === undefined ? {} : { statePath: parsed.state }),
         timeoutMs: parsed.timeoutMs
       });
@@ -174,14 +207,24 @@ function registerAuthCommands(
 
   auth.command('status')
     .description('Check whether the saved creator session is still valid.')
+    .option(
+      '--browser <browser>',
+      'browser channel: chrome (default), msedge, or chromium',
+      'chrome'
+    )
+    .option('--cdp <url>', 'connect to an existing browser via CDP')
     .option('--state <path>', 'Playwright storageState path')
     .action(async (options) => {
-      const parsed = authStateOptionsSchema.parse(
-        options.state === undefined ? {} : { state: options.state }
-      );
-      const result = await authService.status(
-        parsed.state === undefined ? {} : { statePath: parsed.state }
-      );
+      const parsed = authStateOptionsSchema.parse({
+        ...(options.browser === undefined ? {} : { browser: options.browser }),
+        ...(options.cdp === undefined ? {} : { cdp: options.cdp }),
+        ...(options.state === undefined ? {} : { state: options.state })
+      });
+      const result = await authService.status({
+        ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
+        ...(parsed.cdp === undefined ? {} : { cdpUrl: parsed.cdp }),
+        ...(parsed.state === undefined ? {} : { statePath: parsed.state })
+      });
       dependencies.stdout(`${renderToutiaoAuthStatusAsJson(result)}\n`);
     });
 
@@ -221,6 +264,12 @@ function registerPublishCommands(
       'draft (default) or publish (explicit live submit)',
       'draft'
     )
+    .option(
+      '--browser <browser>',
+      'browser channel: chrome (default), msedge, or chromium',
+      'chrome'
+    )
+    .option('--cdp <url>', 'connect to managed/real browser via CDP')
     .option('--state <path>', 'Playwright storageState path')
     .option('--dry-run', 'validate inputs and auth state without writing')
     .option('--headed', 'show the browser window while publishing')
@@ -243,6 +292,12 @@ function registerPublishCommands(
       'draft (default) or publish (explicit live submit)',
       'draft'
     )
+    .option(
+      '--browser <browser>',
+      'browser channel: chrome (default), msedge, or chromium',
+      'chrome'
+    )
+    .option('--cdp <url>', 'connect to managed/real browser via CDP')
     .option('--state <path>', 'Playwright storageState path')
     .option('--dry-run', 'validate inputs and auth state without writing')
     .option('--headed', 'show the browser window while publishing')
@@ -255,6 +310,50 @@ function registerPublishCommands(
     });
 }
 
+function registerManagedBrowserCommands(
+  toutiao: Command,
+  dependencies: Pick<ToutiaoCommandDependencies, 'stdout'>
+): void {
+  const browser = toutiao.command('browser')
+    .description('Manage a dedicated debuggable Chrome/Edge profile for real-browser automation.');
+
+  browser.command('start')
+    .description('Start a dedicated Chrome/Edge profile with remote debugging (does not use your daily browser profile).')
+    .option('--browser <browser>', 'chrome or msedge', 'chrome')
+    .option('--port <port>', 'remote debugging port', parsePositiveInt, 9222)
+    .option('--profile <path>', 'dedicated user-data-dir for this automation profile')
+    .action(async (options) => {
+      const parsed = managedBrowserStartSchema.parse({
+        browser: options.browser,
+        port: options.port,
+        ...(options.profile === undefined ? {} : { profile: options.profile })
+      });
+      const result = await startManagedBrowser({
+        browser: parsed.browser,
+        port: parsed.port,
+        ...(parsed.profile === undefined ? {} : { profilePath: parsed.profile })
+      });
+      dependencies.stdout(`${renderToutiaoManagedBrowserAsJson(result)}\n`);
+    });
+
+  browser.command('status')
+    .description('Check whether the managed browser CDP endpoint is ready.')
+    .option('--cdp <url>', 'CDP URL to probe')
+    .action(async (options) => {
+      const result = await statusManagedBrowser({
+        ...(options.cdp === undefined ? {} : { cdpUrl: options.cdp })
+      });
+      dependencies.stdout(`${renderToutiaoManagedBrowserAsJson(result)}\n`);
+    });
+
+  browser.command('stop')
+    .description('Stop the managed browser started by ants toutiao browser start.')
+    .action(async () => {
+      const result = await stopManagedBrowser();
+      dependencies.stdout(`${renderToutiaoManagedBrowserAsJson(result)}\n`);
+    });
+}
+
 function buildArticlePublishRequest(
   parsed: z.infer<typeof publishArticleOptionsSchema>
 ): Parameters<ToutiaoPublishService['publishArticle']>[0] {
@@ -264,6 +363,8 @@ function buildArticlePublishRequest(
     dryRun: parsed.dryRun,
     headed: parsed.headed,
     strategy: parsed.strategy,
+    ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
+    ...(parsed.cdp === undefined ? {} : { cdpUrl: parsed.cdp }),
     ...(parsed.category === undefined ? {} : { category: parsed.category }),
     ...(parsed.claim === undefined ? {} : { claim: parsed.claim }),
     ...(parsed.content === undefined ? {} : { content: parsed.content }),
@@ -282,6 +383,8 @@ function buildMicroPublishRequest(
     dryRun: parsed.dryRun,
     headed: parsed.headed,
     strategy: parsed.strategy,
+    ...(parsed.browser === undefined ? {} : { browser: parsed.browser }),
+    ...(parsed.cdp === undefined ? {} : { cdpUrl: parsed.cdp }),
     ...(parsed.content === undefined ? {} : { content: parsed.content }),
     ...(parsed.contentFile === undefined ? {} : { contentFile: parsed.contentFile }),
     ...(images === undefined ? {} : { images }),

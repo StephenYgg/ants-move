@@ -79,6 +79,17 @@ export function renderToutiaoAuthStatusAsJson(result: ToutiaoAuthStatusResult): 
   );
 }
 
+export function renderToutiaoManagedBrowserAsJson(result: unknown): string {
+  return JSON.stringify(
+    {
+      ok: true,
+      data: result
+    },
+    null,
+    2
+  );
+}
+
 export function renderToutiaoPublishResultAsJson(result: ToutiaoPublishResult): string {
   return JSON.stringify(
     {

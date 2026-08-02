@@ -38,10 +38,17 @@ describe('ToutiaoAuthService', () => {
     expect(loginWithQr).toHaveBeenCalledWith(expect.objectContaining({ statePath }));
   });
 
-  it('reports logged out when the state file is missing', async () => {
+  it('reports logged out when the state file is missing and session check fails', async () => {
     const runtime: ToutiaoPublishRuntime = {
       loginWithQr: vi.fn(),
-      withAuthedSession: vi.fn()
+      withAuthedSession: vi.fn(async () => {
+        const { ToutiaoCommandError } = await import('../../src/toutiao/types.js');
+        throw new ToutiaoCommandError(
+          'TOUTIAO_AUTH_REQUIRED',
+          'missing',
+          2
+        );
+      })
     };
     const service = new ToutiaoAuthService({ publishRuntime: runtime });
     const statePath = join(tmpdir(), `missing-${Date.now()}.json`);
@@ -52,7 +59,7 @@ describe('ToutiaoAuthService', () => {
       loggedIn: false,
       statePath
     });
-    expect(runtime.withAuthedSession).not.toHaveBeenCalled();
+    expect(runtime.withAuthedSession).toHaveBeenCalled();
   });
 
   it('checks session validity when the state file exists', async () => {
