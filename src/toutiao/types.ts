@@ -124,6 +124,11 @@ export interface ToutiaoArticlePublishInput {
   firstPublish?: boolean;
   headed: boolean;
   keywords: string[];
+  /**
+   * Optional 添加位置 / city name. Best-effort UI fill; never fails publish.
+   * 添加至合集 is not supported (account-specific multi-step picker).
+   */
+  location?: string;
   statePath: string;
   strategy: ToutiaoPublishStrategy;
   title: string;
@@ -137,6 +142,10 @@ export interface ToutiaoMicroPublishInput {
   firstPublish?: boolean;
   headed: boolean;
   imagePaths: string[];
+  /**
+   * Optional 添加位置 / city name. Best-effort UI fill; never fails publish.
+   */
+  location?: string;
   statePath: string;
   strategy: ToutiaoPublishStrategy;
   topic?: string;

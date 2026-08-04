@@ -101,6 +101,7 @@ ants toutiao publish article \
   [--covers <path,path,...>] \
   [--keywords <csv>] \
   [--category <name>] \
+  [--location <name>] \
   [--claim <name>] \
   [--first-publish] \
   [--strategy draft|publish] \
@@ -114,6 +115,7 @@ ants toutiao publish micro \
   --content <text> | --content-file <path> \
   --images <path,path,...> \
   [--topic <name>] \
+  [--location <name>] \
   [--claim <name>] \
   [--first-publish] \
   [--strategy draft|publish] \
@@ -143,6 +145,7 @@ ants toutiao publish micro \
 | Option | Maps to console control |
 |--------|-------------------------|
 | `--topic <name>` | Micro topic (toolbar picker or `#topic#` text fallback) |
+| `--location <name>` | Optional city/location (best-effort; failure never blocks publish) |
 | `--claim <name>` | Work-declaration checkbox label as shown in the console (exact UI text) |
 | `--first-publish` | Toutiao first-publish exclusive (requires ≥100 content characters) |
 | `--keywords <csv>` | Article keywords when the console exposes the field |
@@ -156,7 +159,7 @@ Draft/publish success is confirmed only when the creator save API returns a real
 - Article: `POST /mp/agw/article/publish` with `pgc_id`
 - Micro: `POST /mp/agw/draft/save_ugc_draft` with `gid`
 
-UI toasts alone are not treated as success.
+UI toasts alone are not treated as success. The save-response waiter arms only after form fill (before the save/publish click), so typing autosave is not mistaken for intentional save.
 
 Publish bounds: one article or one micro-post per invocation; body text at most 1 MB; article titles 2–30 characters; article body images 3–20; micro-post images 2–9; each image at most 10 MB. The same auth state file is single-flight across processes via a lock file; concurrent holders receive `TOUTIAO_LOCK_HELD`. Save/publish is not automatically retried.
 

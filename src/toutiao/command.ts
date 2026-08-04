@@ -80,6 +80,7 @@ const publishArticleOptionsSchema = z.object({
   headed: z.boolean().default(false),
   images: z.string().optional(),
   keywords: z.string().optional(),
+  location: z.string().optional(),
   state: z.string().optional(),
   strategy: publishStrategySchema,
   title: z.string().min(1)
@@ -95,6 +96,7 @@ const publishMicroOptionsSchema = z.object({
   firstPublish: z.boolean().default(false),
   headed: z.boolean().default(false),
   images: z.string().optional(),
+  location: z.string().optional(),
   state: z.string().optional(),
   strategy: publishStrategySchema,
   topic: z.string().optional()
@@ -261,12 +263,13 @@ function registerPublishCommands(
     .option('--content <text>', 'article body text')
     .option('--content-file <path>', 'read article body from a file')
     .option('--images <paths>', 'comma-separated body images embedded in paragraphs (min 3)')
-    .option('--cover <path>', 'local cover image path (单图主图; defaults to first body image)')
-    .option('--covers <paths>', 'comma-separated cover images (up to 3 for 三图)')
+    .option('--cover <path>', 'local cover image path (single cover; defaults to first body image)')
+    .option('--covers <paths>', 'comma-separated cover images (up to 3 for three-cover layout)')
     .option('--keywords <csv>', 'comma-separated keywords/tags')
     .option('--category <name>', 'category label as shown in the creator console')
-    .option('--claim <name>', '作品声明 label as shown in the creator console')
-    .option('--first-publish', 'enable 头条首发 (requires ≥100 content characters)')
+    .option('--claim <name>', 'work-declaration label as shown in the creator console')
+    .option('--location <name>', 'optional location / city name (best-effort; never fails publish)')
+    .option('--first-publish', 'enable Toutiao first-publish exclusive (requires ≥100 content characters)')
     .option(
       '--strategy <strategy>',
       'draft (default) or publish (explicit live submit)',
@@ -294,9 +297,10 @@ function registerPublishCommands(
     .option('--content <text>', 'micro-post body text')
     .option('--content-file <path>', 'read micro-post body from a file')
     .option('--images <paths>', 'comma-separated local image paths (min 2, max 9)')
-    .option('--topic <name>', '创作话题 / hashtag without requiring # wrappers')
-    .option('--claim <name>', '作品声明 label as shown in the creator console')
-    .option('--first-publish', 'enable 头条首发 (requires ≥100 content characters)')
+    .option('--topic <name>', 'topic / hashtag without requiring # wrappers')
+    .option('--claim <name>', 'work-declaration label as shown in the creator console')
+    .option('--location <name>', 'optional location / city name (best-effort; never fails publish)')
+    .option('--first-publish', 'enable Toutiao first-publish exclusive (requires ≥100 content characters)')
     .option(
       '--strategy <strategy>',
       'draft (default) or publish (explicit live submit)',
@@ -386,6 +390,7 @@ function buildArticlePublishRequest(
     ...(covers === undefined ? {} : { covers }),
     ...(images === undefined ? {} : { images }),
     ...(keywords === undefined ? {} : { keywords }),
+    ...(parsed.location === undefined ? {} : { location: parsed.location }),
     ...(parsed.state === undefined ? {} : { statePath: parsed.state })
   };
 }
@@ -405,6 +410,7 @@ function buildMicroPublishRequest(
     ...(parsed.content === undefined ? {} : { content: parsed.content }),
     ...(parsed.contentFile === undefined ? {} : { contentFile: parsed.contentFile }),
     ...(images === undefined ? {} : { images }),
+    ...(parsed.location === undefined ? {} : { location: parsed.location }),
     ...(parsed.state === undefined ? {} : { statePath: parsed.state }),
     ...(parsed.topic === undefined ? {} : { topic: parsed.topic })
   };

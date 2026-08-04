@@ -33,7 +33,8 @@ export async function setArticleCoverMode(
 
 /**
  * Upload cover image(s) for article 展示封面.
- * Opens the + slot, uses 本地上传 / file input, confirms with 确定.
+ * Flow: select 单图|三图 → open + slot → 本地上传 / file input → 确定.
+ * Throws if cover cannot be set (callers may catch for best-effort).
  */
 export async function setArticleCoverImages(
   page: Page,
@@ -45,18 +46,53 @@ export async function setArticleCoverImages(
   }
 
   const mode: ArticleCoverMode = imagePaths.length >= 3 ? 'triple' : 'single';
-  await setArticleCoverMode(page, mode);
-  await page.waitForTimeout(400);
+  const paths = imagePaths.slice(0, mode === 'triple' ? 3 : 1);
 
-  // Open the first empty cover slot (+). Prefer SVG/plus inside .article-cover.
+  // Do not run full overlay dismiss here — it can hide the cover media modal.
+  await page.keyboard.press('Escape').catch(() => undefined);
+  await page.locator('.article-cover, .pgc-edit-cell').filter({ hasText: /展示封面|单图|三图/ })
+    .first()
+    .scrollIntoViewIfNeeded()
+    .catch(() => undefined);
+  await page.waitForTimeout(300);
+
+  await setArticleCoverMode(page, mode);
+  await page.waitForTimeout(500);
+
+  await openArticleCoverUploadSlot(page);
+  await uploadImagesInMediaModal(page, paths);
+
+  // Verify cover area shows a preview image (not only the + placeholder).
+  const preview = page.locator('.article-cover img').first();
+  const hasPreview = await preview
+    .waitFor({ state: 'visible', timeout: 12_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!hasPreview) {
+    // Triple mode may render multiple slots; any cover img counts.
+    const count = await page.locator('.article-cover img').count().catch(() => 0);
+    if (count === 0) {
+      throw uiChangedError('Cover image preview did not appear after upload.', {
+        mode,
+        paths
+      });
+    }
+  }
+  await page.waitForTimeout(400);
+}
+
+async function openArticleCoverUploadSlot(page: Page): Promise<void> {
   const coverRoot = page.locator('.article-cover').first();
+  await coverRoot.waitFor({ state: 'visible', timeout: 10_000 });
+
   const slotCandidates = [
     coverRoot.locator('[class*="upload"]').first(),
     coverRoot.locator('[class*="plus"]').first(),
     coverRoot.locator('svg').first(),
-    coverRoot.getByText('+', { exact: true }).first()
+    coverRoot.getByText('+', { exact: true }).first(),
+    coverRoot.locator('.byte-upload, [class*="Upload"]').first()
   ];
-  let opened = false;
+
   for (const slot of slotCandidates) {
     if ((await slot.count().catch(() => 0)) === 0) {
       continue;
@@ -65,19 +101,36 @@ export async function setArticleCoverImages(
       continue;
     }
     await slot.click({ force: true, timeout: 8_000 });
-    opened = true;
-    break;
+    await page.waitForTimeout(700);
+    if (await isMediaUploadUiOpen(page)) {
+      return;
+    }
   }
-  if (!opened) {
-    await coverRoot.click({ force: true, timeout: 5_000 });
+
+  // Coordinate click near the first + tile.
+  const box = await coverRoot.boundingBox();
+  if (box !== null) {
+    await page.mouse.click(box.x + 40, box.y + 80);
+    await page.waitForTimeout(700);
+    if (await isMediaUploadUiOpen(page)) {
+      return;
+    }
   }
-  await page.waitForTimeout(800);
 
-  const paths = imagePaths.slice(0, mode === 'triple' ? 3 : 1);
-  await uploadImagesInMediaModal(page, paths);
+  throw uiChangedError('Could not open the article cover upload UI.');
+}
 
-  // Cover preview should show at least one image / non-empty slot.
-  await page.waitForTimeout(800);
+async function isMediaUploadUiOpen(page: Page): Promise<boolean> {
+  if (await page.getByRole('button', { name: /本地上传/ }).first().isVisible().catch(() => false)) {
+    return true;
+  }
+  if ((await page.locator('input[type="file"]').count()) > 0) {
+    return true;
+  }
+  if (await page.locator('.mp-ic-img-drawer, .byte-modal, text=上传图片').first().isVisible().catch(() => false)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -209,7 +262,7 @@ export async function fillArticleBodyWithInlineImages(
     }
   }
 
-  const imgCount = await editor.locator('img').count().catch(() => 0);
+  const imgCount = await countBodyImages(editor);
   if (imgCount < imagePaths.length) {
     throw uiChangedError(
       `Article body expected at least ${imagePaths.length} embedded images, found ${imgCount}.`,
@@ -296,6 +349,71 @@ function assertTextNotOverwritten(
 }
 
 /**
+ * Descriptor for an <img> found inside the article editor.
+ * Used by pure counting logic so unit tests need no Playwright.
+ */
+export type BodyImageCandidate = {
+  /** True when the img sits under a .pgc-img content wrapper. */
+  inPgcImg: boolean;
+  /** Rendered or declared width in CSS pixels (0 if unknown). */
+  width: number;
+  /** Rendered or declared height in CSS pixels (0 if unknown). */
+  height: number;
+};
+
+/** Icons and toolbar chrome are typically ≤32px on both axes. */
+const TINY_ICON_MAX_PX = 32;
+
+/**
+ * Count only real content images among editor img candidates.
+ * Prefer `.pgc-img img` when any exist; otherwise all non-tiny imgs.
+ */
+export function countBodyImageCandidates(images: BodyImageCandidate[]): number {
+  const isTinyIcon = (image: BodyImageCandidate): boolean =>
+    image.width > 0
+    && image.height > 0
+    && image.width <= TINY_ICON_MAX_PX
+    && image.height <= TINY_ICON_MAX_PX;
+
+  const pgc = images.filter((image) => image.inPgcImg);
+  const pool = pgc.length > 0 ? pgc : images;
+  return pool.filter((image) => !isTinyIcon(image)).length;
+}
+
+/**
+ * Count content images inside a ProseMirror article body.
+ * Ignores UI chrome / tiny icons that may appear under the editor root.
+ */
+export async function countBodyImages(editor: Locator): Promise<number> {
+  const candidates = await editor.evaluate((root) => {
+    const result: Array<{ inPgcImg: boolean; width: number; height: number }> = [];
+    const imgs = root.querySelectorAll('img');
+    for (const node of imgs) {
+      const img = node as HTMLImageElement;
+      const rect = img.getBoundingClientRect();
+      const width = rect.width
+        || img.naturalWidth
+        || img.width
+        || Number(img.getAttribute('width'))
+        || 0;
+      const height = rect.height
+        || img.naturalHeight
+        || img.height
+        || Number(img.getAttribute('height'))
+        || 0;
+      result.push({
+        inPgcImg: img.closest('.pgc-img') !== null,
+        width,
+        height
+      });
+    }
+    return result;
+  }).catch(() => [] as BodyImageCandidate[]);
+
+  return countBodyImageCandidates(candidates);
+}
+
+/**
  * Insert one image at the current caret in the article ProseMirror editor.
  * Prefer clipboard paste; fall back to toolbar drawer upload.
  */
@@ -304,7 +422,7 @@ export async function insertArticleInlineImage(
   imagePath: string
 ): Promise<void> {
   const editor = page.locator('.ProseMirror').first();
-  const beforeCount = await editor.locator('img').count().catch(() => 0);
+  const beforeCount = await countBodyImages(editor);
 
   await page.keyboard.press('Escape').catch(() => undefined);
   await focusEditorEndCollapsed(page, editor);
@@ -480,7 +598,7 @@ async function waitForEditorImageIncrease(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const afterCount = await editor.locator('img').count().catch(() => 0);
+    const afterCount = await countBodyImages(editor);
     if (afterCount > beforeCount) {
       await editor.page().waitForTimeout(350);
       return true;
@@ -498,42 +616,49 @@ export async function uploadImagesInMediaModal(
   page: Page,
   imagePaths: string[]
 ): Promise<void> {
-  // Prefer an explicit 本地上传 button (cover modal / micro drawer).
-  const localUpload = page.getByRole('button', { name: /本地上传/ }).first();
-  const hasLocal = await localUpload
-    .waitFor({ state: 'visible', timeout: 6_000 })
-    .then(() => true)
-    .catch(() => false);
+  // Wait until either 本地上传 or a file input is present.
+  const openDeadline = Date.now() + 10_000;
+  let hasLocal = false;
+  let hasFile = false;
+  while (Date.now() < openDeadline) {
+    hasLocal = await page.getByRole('button', { name: /本地上传/ }).first()
+      .isVisible()
+      .catch(() => false);
+    hasFile = (await page.locator('input[type="file"]').count()) > 0;
+    if (hasLocal || hasFile) {
+      break;
+    }
+    await page.waitForTimeout(200);
+  }
 
-  if (hasLocal) {
+  if (hasFile && !hasLocal) {
+    await setFilesOnAnyInput(page, imagePaths);
+  } else if (hasLocal) {
+    const localUpload = page.getByRole('button', { name: /本地上传/ }).first();
     const [chooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 10_000 }).catch(() => null),
+      page.waitForEvent('filechooser', { timeout: 12_000 }).catch(() => null),
       localUpload.click({ force: true })
     ]);
     if (chooser !== null) {
       await chooser.setFiles(imagePaths);
     } else {
-      // Some builds inject a file input only after the button click.
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(500);
       await setFilesOnAnyInput(page, imagePaths);
     }
   } else {
-    // Drawer already showing file inputs (article body toolbar path).
-    const inputDeadline = Date.now() + 5_000;
-    while (Date.now() < inputDeadline && (await page.locator('input[type="file"]').count()) === 0) {
-      await page.waitForTimeout(200);
-    }
-    if ((await page.locator('input[type="file"]').count()) === 0) {
-      throw uiChangedError(
-        'Image upload UI opened but no file input or 本地上传 control was available.'
-      );
-    }
-    await setFilesOnAnyInput(page, imagePaths);
+    throw uiChangedError(
+      'Image upload UI opened but no file input or 本地上传 control was available.'
+    );
   }
 
   // Wait for upload preview thumbnail(s) then confirm.
-  await page.waitForTimeout(2_000);
+  await page.waitForTimeout(2_200);
   await confirmMediaModal(page);
+  // Close residual drawers/modals so later form steps are not blocked.
+  if (await page.getByRole('button', { name: /本地上传/ }).first().isVisible().catch(() => false)) {
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
 }
 
 async function setFilesOnAnyInput(page: Page, imagePaths: string[]): Promise<void> {
@@ -659,6 +784,125 @@ async function isByteCheckboxChecked(label: Locator): Promise<boolean> {
 }
 
 /**
+ * Best-effort: set 添加位置 / city marker when the control exists.
+ * Never throws — missing UI, geolocation prompts, or failed fill must not block publish.
+ * Returns true only when a location appears to have been applied.
+ *
+ * Note: 添加至合集 is intentionally not automated (picker UX is account-specific
+ * and multi-step); callers should omit collection flags.
+ */
+export async function setLocation(page: Page, location: string): Promise<boolean> {
+  const value = location.trim();
+  if (value === '') {
+    return false;
+  }
+
+  try {
+    await dismissBlockingOverlays(page);
+
+    // Open the location picker if not already open.
+    const openTriggers = [
+      page.getByRole('button', { name: /添加位置/ }).first(),
+      page.getByText('添加位置', { exact: false }).first(),
+      page.locator('[class*="location"], [class*="Location"], [class*="poi"]')
+        .filter({ hasText: /添加位置|位置|地点/ })
+        .first(),
+      page.getByText(/添加位置|标记位置|选择位置/, { exact: false }).first()
+    ];
+
+    let opened = false;
+    for (const trigger of openTriggers) {
+      if ((await trigger.count().catch(() => 0)) === 0) {
+        continue;
+      }
+      if (!(await trigger.isVisible().catch(() => false))) {
+        continue;
+      }
+      await trigger.click({ force: true, timeout: 5_000 }).catch(() => undefined);
+      opened = true;
+      await page.waitForTimeout(500);
+      break;
+    }
+
+    // Search / city input inside the picker (or already visible on form).
+    const searchCandidates = [
+      page.locator('input[placeholder*="位置"]').first(),
+      page.locator('input[placeholder*="地点"]').first(),
+      page.locator('input[placeholder*="搜索位置"]').first(),
+      page.locator('input[placeholder*="搜索"]').first(),
+      page.locator(
+        '[class*="location"] input, [class*="Location"] input, [class*="poi"] input, .byte-input input'
+      ).first()
+    ];
+
+    let search: Locator | undefined;
+    for (const candidate of searchCandidates) {
+      if ((await candidate.count().catch(() => 0)) === 0) {
+        continue;
+      }
+      if (!(await candidate.isVisible().catch(() => false))) {
+        continue;
+      }
+      search = candidate;
+      break;
+    }
+
+    if (search === undefined) {
+      // No searchable control — if we never opened a picker, location is unavailable.
+      if (!opened) {
+        return false;
+      }
+      // Picker opened but no input: try selecting a visible suggestion by name.
+      return await pickLocationSuggestion(page, value);
+    }
+
+    await search.click({ force: true, timeout: 3_000 }).catch(() => undefined);
+    await search.fill(value);
+    await page.waitForTimeout(800);
+
+    const picked = await pickLocationSuggestion(page, value);
+    if (picked) {
+      return true;
+    }
+
+    // Last resort: confirm typed value with Enter (some UIs accept free text).
+    await search.press('Enter').catch(() => undefined);
+    await page.waitForTimeout(400);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pickLocationSuggestion(page: Page, value: string): Promise<boolean> {
+  const suggestion = page.locator(
+    `[class*="location"] li, [class*="Location"] li, [class*="poi"] li, ` +
+    `[role="option"], .byte-list-item, .byte-select-option, [class*="suggest"] li, ` +
+    `[class*="dropdown"] li, [class*="Dropdown"] li`
+  ).filter({ hasText: value }).first();
+
+  if ((await suggestion.count().catch(() => 0)) > 0
+    && await suggestion.isVisible().catch(() => false)) {
+    await suggestion.click({ force: true, timeout: 5_000 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    return true;
+  }
+
+  // First generic list item after search (city marker may not match exact text).
+  const firstItem = page.locator(
+    `[class*="location"] li, [class*="poi"] li, [role="option"], .byte-list-item`
+  ).first();
+  if ((await firstItem.count().catch(() => 0)) > 0
+    && await firstItem.isVisible().catch(() => false)) {
+    await firstItem.click({ force: true, timeout: 5_000 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Select a 作品声明 option by visible label text (partial match OK).
  */
 export async function setWorkClaim(page: Page, claim: string): Promise<void> {
@@ -700,40 +944,51 @@ export async function applyMicroTopic(
   }
   const hashtag = `#${normalized}#`;
 
-  await dismissBlockingOverlays(page);
+  await page.keyboard.press('Escape').catch(() => undefined);
   const topicButton = page.getByRole('button', { name: '话题' }).first();
-  if ((await topicButton.count()) > 0) {
+  if ((await topicButton.count()) > 0 && await topicButton.isVisible().catch(() => false)) {
     await topicButton.click({ force: true, timeout: 5_000 }).catch(() => undefined);
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(900);
 
     const search = page.locator(
-      'input[placeholder*="话题"], input[placeholder*="搜索话题"], input[placeholder*="搜索"]'
+      'input[placeholder*="话题"], input[placeholder*="搜索话题"], input[placeholder*="搜索"], input[placeholder*="输入"]'
     ).first();
+    if ((await search.count()) > 0) {
+      await search.waitFor({ state: 'visible', timeout: 4_000 }).catch(() => undefined);
+    }
     if ((await search.count()) > 0 && await search.isVisible().catch(() => false)) {
-      await search.fill(normalized);
-      await page.waitForTimeout(1_000);
+      await search.click({ force: true });
+      await search.fill('');
+      await search.type(normalized, { delay: 40 });
+      await page.waitForTimeout(1_200);
+
       const suggestion = page.locator(
-        `[class*="topic"] li, [class*="Topic"] li, [role="option"], .byte-list-item`
+        `[class*="topic"] li, [class*="Topic"] li, [class*="tweet"] li, [role="option"], .byte-list-item, .byte-select-option`
       ).filter({ hasText: normalized }).first();
-      if ((await suggestion.count()) > 0) {
+      if ((await suggestion.count()) > 0 && await suggestion.isVisible().catch(() => false)) {
         await suggestion.click({ force: true, timeout: 5_000 }).catch(() => undefined);
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(500);
         return hashtag;
       }
+
+      // Create/use free-form topic via Enter when no suggestion.
       await page.keyboard.press('Enter').catch(() => undefined);
-      await page.waitForTimeout(400);
-      return hashtag;
+      await page.waitForTimeout(500);
+      const editorAfter = page.locator('.ProseMirror').first();
+      const text = await editorAfter.innerText().catch(() => '');
+      if (text.includes(normalized) || text.includes('#')) {
+        return hashtag;
+      }
     }
 
-    // No search UI — close any popover and fall back to typing hashtag.
     await page.keyboard.press('Escape').catch(() => undefined);
   }
 
-  // Fallback: type hashtag into the editor at the end.
+  // Fallback: append #topic# with collapsed caret (never select-all).
   const editor = page.locator('.ProseMirror').first();
-  await editor.click({ force: true });
-  await page.keyboard.press('End').catch(() => undefined);
-  await page.keyboard.type(`\n${hashtag}`, { delay: 20 });
+  await focusEditorEndCollapsed(page, editor);
+  await page.keyboard.press('Enter').catch(() => undefined);
+  await page.keyboard.type(hashtag, { delay: 20 });
   await page.waitForTimeout(300);
   return hashtag;
 }

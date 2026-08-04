@@ -252,6 +252,63 @@ describe('ants toutiao auth and publish commands', () => {
     }));
   });
 
+  it('forwards --location for article and micro publish', async () => {
+    let stdout = '';
+    const dir = await mkdtemp(join(tmpdir(), 'ants-cli-location-'));
+    tempDirs.push(dir);
+    const statePath = join(dir, 'state.json');
+    await writeFile(statePath, '{}');
+    const images = await writeFakeImages(dir, 3);
+    const microImages = images.slice(0, 2);
+    const { publishArticle, publishMicro, runtime } = createPublishRuntime();
+    const cli = createCli({
+      stdout: (value) => {
+        stdout += value;
+      },
+      toutiaoPublishRuntime: runtime,
+      toutiaoRuntime: createCollectorRuntime()
+    });
+
+    const articleExit = await cli.run([
+      'toutiao',
+      'publish',
+      'article',
+      '--title',
+      'Located article',
+      '--content',
+      'Body',
+      '--images',
+      images.join(','),
+      '--location',
+      '杭州',
+      '--state',
+      statePath
+    ]);
+    expect(articleExit).toBe(0);
+    expect(publishArticle).toHaveBeenCalledWith(expect.objectContaining({
+      location: '杭州'
+    }));
+
+    stdout = '';
+    const microExit = await cli.run([
+      'toutiao',
+      'publish',
+      'micro',
+      '--content',
+      'Located micro',
+      '--images',
+      microImages.join(','),
+      '--location',
+      '成都',
+      '--state',
+      statePath
+    ]);
+    expect(microExit).toBe(0);
+    expect(publishMicro).toHaveBeenCalledWith(expect.objectContaining({
+      location: '成都'
+    }));
+  });
+
   it('returns structured invalid input errors for publish article', async () => {
     let stderr = '';
     const { runtime } = createPublishRuntime();

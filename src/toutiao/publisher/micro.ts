@@ -8,21 +8,32 @@ import {
   mapPlaywrightError,
   prepareCreatorPage
 } from './browser-helpers.js';
-import { TOUTIAO_MICRO_PUBLISH_NEW_URL } from './form-map.js';
+import {
+  PUBLISH_BUTTON_NAMES,
+  PUBLISH_CONFIRM_BUTTON_NAMES,
+  TOUTIAO_MICRO_PUBLISH_NEW_URL
+} from './form-map.js';
 import {
   applyMicroTopic,
   countContentChars,
   setFirstPublishExclusive,
+  setLocation,
   setMicroImages,
   setWorkClaim
 } from './form-options.js';
-import { createSaveResponseWaiter } from './save-monitor.js';
+import {
+  assertNoSaveFailureText,
+  createSaveResponseWaiter,
+  MICRO_SAVE_URL_RE
+} from './save-monitor.js';
 
 export interface PublishMicroOnPageInput {
   claim?: string;
   content: string;
   firstPublish?: boolean;
   imagePaths: string[];
+  /** Optional 添加位置; best-effort, never fails publish. */
+  location?: string;
   strategy: ToutiaoPublishStrategy;
   topic?: string;
 }
@@ -34,15 +45,20 @@ export async function publishMicroOnPage(
 ): Promise<ToutiaoPublishResult> {
   try {
     await openMicroEditor(page);
-    const saveWaiter = createSaveResponseWaiter(
-      page,
-      /\/mp\/agw\/draft\/save_ugc_draft|\/mp\/agw\/article\/publish/i
-    );
+    // Disarmed until after fill so typing autosave cannot fake success.
+    const saveWaiter = createSaveResponseWaiter(page, MICRO_SAVE_URL_RE);
 
     try {
       await fillMicroForm(page, input);
+      saveWaiter.arm();
       await triggerMicroSave(page, input.strategy);
-      return await buildMicroResult(page, input, account, await saveWaiter.wait(45_000));
+      try {
+        return await buildMicroResult(page, input, account, await saveWaiter.wait(45_000));
+      } catch (error) {
+        const bodyText = await page.locator('body').innerText().catch(() => '');
+        assertNoSaveFailureText(bodyText);
+        throw error;
+      }
     } finally {
       saveWaiter.dispose();
     }
@@ -88,6 +104,10 @@ async function fillMicroForm(page: Page, input: PublishMicroOnPageInput): Promis
   }
   if (input.claim !== undefined) {
     await setWorkClaim(page, input.claim);
+  }
+  if (input.location !== undefined && input.location.trim() !== '') {
+    // Best-effort only; missing control must not block save/publish.
+    await setLocation(page, input.location);
   }
   if (input.firstPublish === true) {
     const text = input.content.replace(/\n{2,}/g, '\n').trim();
@@ -152,18 +172,18 @@ async function typeMicroContent(
 }
 
 async function triggerMicroSave(page: Page, strategy: ToutiaoPublishStrategy): Promise<void> {
+  await prepareCreatorPage(page);
   if (strategy === 'draft') {
     await clickMicroSaveDraftButton(page);
     return;
   }
 
-  await clickButtonByNames(page, [/^发布$/, /发布微头条/, /预览并发布/], 'publish');
+  await prepareCreatorPage(page);
+  await page.waitForTimeout(1_500);
+  await clickButtonByNames(page, PUBLISH_BUTTON_NAMES, 'publish');
+  await page.waitForTimeout(800);
   try {
-    await clickButtonByNames(
-      page,
-      [/确认发布/, /确定发布/, /^确定$/, /^确认$/],
-      'confirm publish'
-    );
+    await clickButtonByNames(page, PUBLISH_CONFIRM_BUTTON_NAMES, 'confirm publish');
   } catch {
     // No secondary confirm control.
   }

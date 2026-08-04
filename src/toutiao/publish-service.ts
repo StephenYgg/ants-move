@@ -45,6 +45,8 @@ export class ToutiaoPublishService {
     /** Body images embedded in paragraphs (≥3 required). */
     images?: string[];
     keywords?: string[];
+    /** Optional 添加位置; best-effort UI fill. */
+    location?: string;
     statePath?: string;
     strategy?: ToutiaoPublishStrategy;
     title: string;
@@ -142,7 +144,8 @@ export class ToutiaoPublishService {
           ...(input.category === undefined ? {} : { category: input.category }),
           ...(input.claim === undefined ? {} : { claim: input.claim }),
           ...(input.cover === undefined ? {} : { coverPath: input.cover }),
-          ...(coverPaths.length === 0 ? {} : { coverPaths })
+          ...(coverPaths.length === 0 ? {} : { coverPaths }),
+          ...(input.location === undefined ? {} : { location: input.location })
         })
       )
     );
@@ -158,6 +161,8 @@ export class ToutiaoPublishService {
     firstPublish?: boolean;
     headed?: boolean;
     images?: string[];
+    /** Optional 添加位置; best-effort UI fill. */
+    location?: string;
     statePath?: string;
     strategy?: ToutiaoPublishStrategy;
     topic?: string;
@@ -222,6 +227,7 @@ export class ToutiaoPublishService {
           strategy,
           firstPublish,
           ...(input.claim === undefined ? {} : { claim: input.claim }),
+          ...(input.location === undefined ? {} : { location: input.location }),
           ...(input.topic === undefined ? {} : { topic: input.topic })
         })
       )

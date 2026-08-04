@@ -230,6 +230,38 @@ describe('ToutiaoPublishService', () => {
     });
   });
 
+  it('forwards optional location to article and micro publishers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ants-publish-'));
+    tempDirs.push(dir);
+    const statePath = join(dir, 'state.json');
+    await writeFile(statePath, '{}');
+    const images = await writeFakeImages(dir, 3);
+    const microImages = images.slice(0, 2);
+    const { publishArticle, publishMicro, runtime } = createPublishRuntime();
+    const service = new ToutiaoPublishService({ publishRuntime: runtime });
+
+    await service.publishArticle({
+      content: 'Body text',
+      images,
+      location: '上海',
+      statePath,
+      title: 'With location'
+    });
+    await service.publishMicro({
+      content: 'Micro body',
+      images: microImages,
+      location: '北京',
+      statePath
+    });
+
+    expect(publishArticle).toHaveBeenCalledWith(expect.objectContaining({
+      location: '上海'
+    }));
+    expect(publishMicro).toHaveBeenCalledWith(expect.objectContaining({
+      location: '北京'
+    }));
+  });
+
   it('defaults micro strategy to draft and enforces image limits', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ants-publish-'));
     tempDirs.push(dir);

@@ -60,12 +60,19 @@ export const COVER_INPUT_SELECTORS = [
 
 /** Explicit draft buttons when present. Current console often auto-saves instead. */
 export const DRAFT_BUTTON_NAMES = [/存草稿/, /保存草稿/] as const;
-/** Live publish controls observed on profile_v4 graphic editor. */
+/** Primary live publish controls (do not include confirm dialog labels). */
 export const PUBLISH_BUTTON_NAMES = [
   /预览并发布/,
-  /确认发布/,
   /立即发布/,
+  /发布微头条/,
   /^发布$/
+] as const;
+/** Secondary confirm dialog after primary publish click. */
+export const PUBLISH_CONFIRM_BUTTON_NAMES = [
+  /确认发布/,
+  /确定发布/,
+  /^确定$/,
+  /^确认$/
 ] as const;
 
 export const DEFAULT_AUTH_TIMEOUT_MS = 5 * 60 * 1000;

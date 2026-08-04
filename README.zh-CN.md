@@ -99,6 +99,7 @@ ants toutiao publish article \
   [--covers <path,path,...>] \
   [--keywords <csv>] \
   [--category <name>] \
+  [--location <名称>] \
   [--claim <name>] \
   [--first-publish] \
   [--strategy draft|publish] \
@@ -112,6 +113,7 @@ ants toutiao publish micro \
   --content <text> | --content-file <path> \
   --images <path,path,...> \
   [--topic <name>] \
+  [--location <名称>] \
   [--claim <name>] \
   [--first-publish] \
   [--strategy draft|publish] \
@@ -141,6 +143,7 @@ ants toutiao publish micro \
 | 选项 | 对应后台控件 |
 |------|----------------|
 | `--topic <name>` | 微头条创作话题（工具栏或 `#话题#` 文本兜底） |
+| `--location <名称>` | 添加位置 / 城市（尽力而为，失败不阻断发布） |
 | `--claim <name>` | 作品声明勾选项，例如 `个人观点，仅供参考` |
 | `--first-publish` | 头条首发（正文至少 100 字） |
 | `--keywords <csv>` | 文章关键词（后台有该字段时） |
@@ -154,7 +157,7 @@ ants toutiao publish micro \
 - 文章：`POST /mp/agw/article/publish` 返回 `pgc_id`
 - 微头条：`POST /mp/agw/draft/save_ugc_draft` 返回 `gid`
 
-仅有 UI toast 不算成功。
+仅有 UI toast 不算成功。保存响应 waiter 在表单填写完成后才 arm（保存 / 发布点击之前），避免把输入过程中的自动保存误判为成功。
 
 边界：单次调用一篇文章或一条微头条；正文最多 1 MB；文章标题 2～30 字；文章正文图 3～20 张；微头条图 2～9 张；单图最多 10 MB。同一 auth 状态文件跨进程单飞加锁，并发持有者收到 `TOUTIAO_LOCK_HELD`。保存 / 发布不会自动重试。
 

@@ -10,20 +10,29 @@ export interface ArticleSaveResult {
   url: string;
 }
 
-const ARTICLE_SAVE_URL_RE = /\/mp\/agw\/article\/publish/i;
-/** Micro-post drafts use save_ugc_draft; live publish may still use article/publish. */
-const MICRO_SAVE_URL_RE = /\/mp\/agw\/draft\/save_ugc_draft|\/mp\/agw\/article\/publish|\/mp\/agw\/article\/wtt/i;
+export const ARTICLE_SAVE_URL_RE = /\/mp\/agw\/article\/publish/i;
+/** Micro-post drafts use save_ugc_draft; live publish may use article/publish or wtt. */
+export const MICRO_SAVE_URL_RE =
+  /\/mp\/agw\/draft\/save_ugc_draft|\/mp\/agw\/article\/publish|\/mp\/agw\/article\/wtt/i;
+
+export interface SaveResponseWaiter {
+  /** Start accepting matching POST responses (call after form fill, before save click). */
+  arm: () => void;
+  wait: (timeoutMs?: number) => Promise<ArticleSaveResult>;
+  dispose: () => void;
+}
 
 /**
- * Attach a save-response waiter before edits. Autosave often fires while typing.
+ * Attach a save-response waiter. Autosave often fires while typing.
+ * By default the waiter is disarmed until arm() is called, so fill-time
+ * autosave cannot be mistaken for the intentional draft/publish click.
  */
 export function createSaveResponseWaiter(
   page: Page,
-  urlPattern: RegExp
-): {
-  wait: (timeoutMs?: number) => Promise<ArticleSaveResult>;
-  dispose: () => void;
-} {
+  urlPattern: RegExp,
+  options: { armed?: boolean } = {}
+): SaveResponseWaiter {
+  let armed = options.armed === true;
   let settled = false;
   let resolveFn: ((value: { payload: unknown; url: string }) => void) | undefined;
   let rejectFn: ((error: Error) => void) | undefined;
@@ -33,7 +42,7 @@ export function createSaveResponseWaiter(
   });
 
   const onResponse = (response: Response): void => {
-    if (settled) {
+    if (settled || !armed) {
       return;
     }
     if (response.request().method() !== 'POST') {
@@ -82,10 +91,15 @@ export function createSaveResponseWaiter(
     if (!settled) {
       settled = true;
       page.off('response', onResponse);
+    } else {
+      page.off('response', onResponse);
     }
   };
 
   return {
+    arm: () => {
+      armed = true;
+    },
     dispose,
     wait: async (timeoutMs = 45_000) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -124,7 +138,7 @@ export async function waitForArticleSaveResult(
   page: Page,
   options: { timeoutMs?: number } = {}
 ): Promise<ArticleSaveResult> {
-  const waiter = createSaveResponseWaiter(page, ARTICLE_SAVE_URL_RE);
+  const waiter = createSaveResponseWaiter(page, ARTICLE_SAVE_URL_RE, { armed: true });
   return waiter.wait(options.timeoutMs ?? 45_000);
 }
 
@@ -132,7 +146,7 @@ export async function waitForMicroSaveResult(
   page: Page,
   options: { timeoutMs?: number } = {}
 ): Promise<ArticleSaveResult> {
-  const waiter = createSaveResponseWaiter(page, MICRO_SAVE_URL_RE);
+  const waiter = createSaveResponseWaiter(page, MICRO_SAVE_URL_RE, { armed: true });
   return waiter.wait(options.timeoutMs ?? 45_000);
 }
 
