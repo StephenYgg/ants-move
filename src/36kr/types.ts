@@ -109,7 +109,8 @@ export interface Kr36InformationList {
     totalItems: number;
   };
   request: {
-    firstPage: Kr36Request;
+    /** First page is loaded via the gateway flow API (pageEvent 0). */
+    firstPage: Kr36JsonRequest;
     nextPageEndpoint: string;
   };
 }

@@ -31,7 +31,11 @@ const list: Kr36InformationList = {
     totalItems: 1
   },
   request: {
-    firstPage: { headers: {}, url: 'https://36kr.com/information/AI/' },
+    firstPage: {
+      body: {},
+      headers: {},
+      url: 'https://gateway.36kr.com/api/mis/nav/ifm/subNav/flow'
+    },
     nextPageEndpoint: 'https://gateway.36kr.com'
   }
 };

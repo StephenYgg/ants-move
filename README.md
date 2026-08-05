@@ -42,6 +42,11 @@ Fetch one to 20 information pages from the `AI` or `technology` channel:
 ants 36kr list <AI|technology> [--pages 1..20] [--format json|table] [-t]
 ```
 
+How collection works:
+
+- **Article** loads HTML from `www.36kr.com` (not bare `36kr.com`) and parses `window.initialState`. Bare `36kr.com` often returns a Volcano Engine security-challenge page without article data; when that happens the command returns `KR36_PARSE_ERROR` with a clear security-challenge message.
+- **List** uses only the official gateway flow API (`gateway.36kr.com`, first page `pageEvent: 0`, later pages with `pageCallback`). It does not scrape channel HTML for the first page.
+
 Pagination is serial and bounded at 20 pages per invocation. Each curl response and mapped article result is limited to 20 MB, each list page to 30 items, and the mapped list to 5 MB, so a list retains at most 600 items without accumulating oversized fields across pages.
 
 ## Toutiao commands and verification limitations

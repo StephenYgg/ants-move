@@ -42,6 +42,11 @@ ants 36kr article <article-id> [--format json]
 ants 36kr list <AI|technology> [--pages 1..20] [--format json|table] [-t]
 ```
 
+采集方式：
+
+- **文章**：从 `www.36kr.com` 拉 HTML（不用裸域 `36kr.com`）并解析 `window.initialState`。裸域常被火山引擎安全检测页拦截且没有正文数据；遇到时返回 `KR36_PARSE_ERROR` 并提示安全检测。
+- **列表**：只走官方 gateway 流式接口（`gateway.36kr.com`，首页 `pageEvent: 0`，后续页带 `pageCallback`），不再依赖频道页 HTML。
+
 分页串行，单次调用最多 20 页。每个 curl 响应与映射结果限制 20 MB，每页最多 30 条，映射列表限制 5 MB，因此一次列表最多保留 600 条，且不会跨页累积过大字段。
 
 ## 头条命令与验证限制

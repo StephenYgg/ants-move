@@ -11,10 +11,31 @@ const articleHtml = `
   </body>
 </html>`;
 
-const informationHtml = `
-<script>
-window.initialState={"information":{"informationList":{"itemList":[{"itemId":3882467938040710,"itemType":10,"templateMaterial":{"itemId":3882467938040710,"templateType":1,"widgetImage":"https://img.example.com/first.jpg","publishTime":1783240283508,"widgetTitle":"First information article","summary":"First summary","authorName":"Author One","authorRoute":"detail_author?userId=5653862"},"route":"detail_article?itemId=3882467938040710","siteId":1}],"pageCallback":"first-callback","hasNextPage":1}}};
-</script>`;
+const firstPageJson = JSON.stringify({
+  code: 0,
+  data: {
+    itemList: [
+      {
+        itemId: 3882467938040710,
+        itemType: 10,
+        templateMaterial: {
+          itemId: 3882467938040710,
+          templateType: 1,
+          widgetImage: 'https://img.example.com/first.jpg',
+          publishTime: 1783240283508,
+          widgetTitle: 'First information article',
+          summary: 'First summary',
+          authorName: 'Author One',
+          authorRoute: 'detail_author?userId=5653862'
+        },
+        route: 'detail_article?itemId=3882467938040710',
+        siteId: 1
+      }
+    ],
+    pageCallback: 'first-callback',
+    hasNextPage: 1
+  }
+});
 
 const nextPageJson = JSON.stringify({
   code: 0,
@@ -53,13 +74,13 @@ describe('Kr36ArticleService', () => {
       headers: expect.objectContaining({
         Accept: expect.stringContaining('text/html'),
         'Accept-Language': expect.stringContaining('zh-CN'),
-        Referer: 'https://36kr.com/',
+        Referer: 'https://www.36kr.com/',
         'User-Agent': expect.stringContaining('Mozilla/5.0')
       }),
-      url: 'https://36kr.com/p/3853011900142848?f=rss'
+      url: 'https://www.36kr.com/p/3853011900142848'
     });
     expect(article.id).toBe('3853011900142848');
-    expect(article.url).toBe('https://36kr.com/p/3853011900142848?f=rss');
+    expect(article.url).toBe('https://www.36kr.com/p/3853011900142848');
     expect(article.title).toBe('36Kr article');
     expect(article.summary).toBe('Article summary.');
     expect(article.author.name).toBe('Stephen');
@@ -107,7 +128,23 @@ describe('Kr36ArticleService', () => {
 
     await expect(service.getArticle('3853011900142848')).rejects.toMatchObject({
       code: 'KR36_PARSE_ERROR',
-      exitCode: 2
+      exitCode: 2,
+      message: 'window.initialState was not found in the 36kr article page.'
+    });
+  });
+
+  it('reports a security-challenge parse error when 36kr returns a WAF interstitial', async () => {
+    const service = new Kr36ArticleService({
+      fetchArticleHtml: vi.fn(async () =>
+        '<html><body><p class="title">正在进行安全检测...</p></body></html>'
+      ),
+      fetchJson: vi.fn()
+    });
+
+    await expect(service.getArticle('3853011900142848')).rejects.toMatchObject({
+      code: 'KR36_PARSE_ERROR',
+      exitCode: 2,
+      message: expect.stringContaining('security challenge')
     });
   });
 
@@ -238,20 +275,34 @@ describe('Kr36ArticleService', () => {
   });
 
   it('fetches an information channel and follows pageCallback for additional pages', async () => {
-    const fetchArticleHtml = vi.fn(async () => informationHtml);
-    const fetchJson = vi.fn(async () => nextPageJson);
-    const service = new Kr36ArticleService({ fetchArticleHtml, fetchJson });
+    const fetchJson = vi.fn()
+      .mockResolvedValueOnce(firstPageJson)
+      .mockResolvedValueOnce(nextPageJson);
+    const service = new Kr36ArticleService({ fetchArticleHtml: vi.fn(), fetchJson });
 
     const result = await service.getInformationList({ channel: 'technology', pages: 2 });
 
-    expect(fetchArticleHtml).toHaveBeenCalledWith({
+    expect(fetchJson).toHaveBeenNthCalledWith(1, {
+      body: expect.objectContaining({
+        partner_id: 'web',
+        param: expect.objectContaining({
+          pageCallback: '',
+          pageEvent: 0,
+          pageSize: 30,
+          platformId: 2,
+          siteId: 1,
+          subnavNick: 'technology',
+          subnavType: 1
+        })
+      }),
       headers: expect.objectContaining({
-        Referer: 'https://36kr.com/',
+        Origin: 'https://www.36kr.com',
+        Referer: 'https://www.36kr.com/information/technology/',
         'User-Agent': expect.stringContaining('Mozilla/5.0')
       }),
-      url: 'https://36kr.com/information/technology/'
+      url: 'https://gateway.36kr.com/api/mis/nav/ifm/subNav/flow'
     });
-    expect(fetchJson).toHaveBeenCalledWith({
+    expect(fetchJson).toHaveBeenNthCalledWith(2, {
       body: expect.objectContaining({
         partner_id: 'web',
         param: expect.objectContaining({
@@ -265,8 +316,8 @@ describe('Kr36ArticleService', () => {
         })
       }),
       headers: expect.objectContaining({
-        Origin: 'https://36kr.com',
-        Referer: 'https://36kr.com/information/technology/'
+        Origin: 'https://www.36kr.com',
+        Referer: 'https://www.36kr.com/information/technology/'
       }),
       url: 'https://gateway.36kr.com/api/mis/nav/ifm/subNav/flow'
     });
@@ -276,7 +327,7 @@ describe('Kr36ArticleService', () => {
       authorName: 'Author One',
       id: 3882467938040710,
       title: 'First information article',
-      url: 'https://36kr.com/p/3882467938040710'
+      url: 'https://www.36kr.com/p/3882467938040710'
     });
     expect(result.items[1]).toMatchObject({
       authorName: 'Author Two',
@@ -292,15 +343,15 @@ describe('Kr36ArticleService', () => {
   });
 
   it('stops channel fetching at the requested page count', async () => {
-    const fetchJson = vi.fn(async () => nextPageJson);
+    const fetchJson = vi.fn(async () => firstPageJson);
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => informationHtml),
+      fetchArticleHtml: vi.fn(),
       fetchJson
     });
 
     const result = await service.getInformationList({ channel: 'AI', pages: 1 });
 
-    expect(fetchJson).not.toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalledTimes(1);
     expect(result.channel).toBe('AI');
     expect(result.items).toHaveLength(1);
     expect(result.meta).toMatchObject({
@@ -311,20 +362,24 @@ describe('Kr36ArticleService', () => {
   });
 
   it('maps a sparse first information page with default pagination values', async () => {
-    const sparseInformationHtml = '<script>window.initialState={"information":{"informationList":{"itemList":[{"itemId":9}]}}};</script>';
-    const fetchJson = vi.fn();
+    const fetchJson = vi.fn(async () => JSON.stringify({
+      code: 0,
+      data: {
+        itemList: [{ itemId: 9 }]
+      }
+    }));
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => sparseInformationHtml),
+      fetchArticleHtml: vi.fn(),
       fetchJson
     });
 
     const result = await service.getInformationList({ channel: 'AI' });
 
-    expect(fetchJson).not.toHaveBeenCalled();
+    expect(fetchJson).toHaveBeenCalledTimes(1);
     expect(result.items).toEqual([{
       id: 9,
       title: '',
-      url: 'https://36kr.com/p/9'
+      url: 'https://www.36kr.com/p/9'
     }]);
     expect(result.meta).toMatchObject({
       fetchedPages: 1,
@@ -335,10 +390,8 @@ describe('Kr36ArticleService', () => {
 
   it('defaults an absent first-page item list to an empty collection', async () => {
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () =>
-        '<script>window.initialState={"information":{"informationList":{}}};</script>'
-      ),
-      fetchJson: vi.fn()
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn(async () => JSON.stringify({ code: 0, data: {} }))
     });
 
     await expect(service.getInformationList({ channel: 'AI' })).resolves.toMatchObject({
@@ -347,27 +400,15 @@ describe('Kr36ArticleService', () => {
     });
   });
 
-  it('returns a parse error when information list state is absent', async () => {
-    const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => '<script>window.initialState={};</script>'),
-      fetchJson: vi.fn()
-    });
-
-    await expect(service.getInformationList({ channel: 'AI', pages: 1 }))
-      .rejects.toMatchObject({ code: 'KR36_PARSE_ERROR' });
-  });
-
   it('rejects a first information page containing more than 30 items', async () => {
-    const oversizedHtml = `<script>window.initialState=${JSON.stringify({
-      information: {
-        informationList: {
+    const service = new Kr36ArticleService({
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn(async () => JSON.stringify({
+        code: 0,
+        data: {
           itemList: Array.from({ length: 31 }, (_, index) => ({ itemId: index + 1 }))
         }
-      }
-    })};</script>`;
-    const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => oversizedHtml),
-      fetchJson: vi.fn()
+      }))
     });
 
     await expect(service.getInformationList({ channel: 'AI', pages: 1 }))
@@ -381,13 +422,15 @@ describe('Kr36ArticleService', () => {
 
   it('rejects a later information page containing more than 30 items', async () => {
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => informationHtml),
-      fetchJson: vi.fn(async () => JSON.stringify({
-        code: 0,
-        data: {
-          itemList: Array.from({ length: 31 }, (_, index) => ({ itemId: index + 1 }))
-        }
-      }))
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn()
+        .mockResolvedValueOnce(firstPageJson)
+        .mockResolvedValueOnce(JSON.stringify({
+          code: 0,
+          data: {
+            itemList: Array.from({ length: 31 }, (_, index) => ({ itemId: index + 1 }))
+          }
+        }))
     });
 
     await expect(service.getInformationList({ channel: 'AI', pages: 2 }))
@@ -399,19 +442,17 @@ describe('Kr36ArticleService', () => {
   });
 
   it('rejects a first information page exceeding five retained megabytes', async () => {
-    const oversizedHtml = `<script>window.initialState=${JSON.stringify({
-      information: {
-        informationList: {
+    const service = new Kr36ArticleService({
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn(async () => JSON.stringify({
+        code: 0,
+        data: {
           itemList: [{
             itemId: 1,
             templateMaterial: { summary: 'x'.repeat(5 * 1024 * 1024) }
           }]
         }
-      }
-    })};</script>`;
-    const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => oversizedHtml),
-      fetchJson: vi.fn()
+      }))
     });
 
     const error = await service.getInformationList({ channel: 'AI', pages: 1 }).then(
@@ -427,29 +468,29 @@ describe('Kr36ArticleService', () => {
   });
 
   it('rejects information pages exceeding five retained megabytes cumulatively', async () => {
-    const firstPageHtml = `<script>window.initialState=${JSON.stringify({
-      information: {
-        informationList: {
-          hasNextPage: 1,
-          itemList: [{
-            itemId: 1,
-            templateMaterial: { summary: 'x'.repeat(3 * 1024 * 1024) }
-          }],
-          pageCallback: 'next'
-        }
-      }
-    })};</script>`;
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => firstPageHtml),
-      fetchJson: vi.fn(async () => JSON.stringify({
-        code: 0,
-        data: {
-          itemList: [{
-            itemId: 2,
-            templateMaterial: { summary: 'y'.repeat(3 * 1024 * 1024) }
-          }]
-        }
-      }))
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn()
+        .mockResolvedValueOnce(JSON.stringify({
+          code: 0,
+          data: {
+            hasNextPage: 1,
+            itemList: [{
+              itemId: 1,
+              templateMaterial: { summary: 'x'.repeat(3 * 1024 * 1024) }
+            }],
+            pageCallback: 'next'
+          }
+        }))
+        .mockResolvedValueOnce(JSON.stringify({
+          code: 0,
+          data: {
+            itemList: [{
+              itemId: 2,
+              templateMaterial: { summary: 'y'.repeat(3 * 1024 * 1024) }
+            }]
+          }
+        }))
     });
 
     const error = await service.getInformationList({ channel: 'AI', pages: 2 }).then(
@@ -465,34 +506,36 @@ describe('Kr36ArticleService', () => {
 
   it.each([
     {
-      json: JSON.stringify({ code: 1, msg: 'upstream rejected request' }),
+      firstJson: JSON.stringify({ code: 1, msg: 'upstream rejected request' }),
       code: 'KR36_REQUEST_FAILED',
       message: 'upstream rejected request'
     },
     {
-      json: JSON.stringify({ code: 1 }),
+      firstJson: JSON.stringify({ code: 1 }),
       code: 'KR36_REQUEST_FAILED',
       message: '36kr information flow request failed.'
     },
     {
-      json: '{invalid-json',
+      firstJson: '{invalid-json',
       code: 'KR36_PARSE_ERROR',
       message: 'Failed to parse 36kr information flow response.'
     }
-  ])('normalizes information flow failures', async ({ code, json, message }) => {
+  ])('normalizes information flow failures', async ({ code, firstJson, message }) => {
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => informationHtml),
-      fetchJson: vi.fn(async () => json)
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn(async () => firstJson)
     });
 
-    await expect(service.getInformationList({ channel: 'AI', pages: 2 }))
+    await expect(service.getInformationList({ channel: 'AI', pages: 1 }))
       .rejects.toMatchObject({ code, message });
   });
 
   it('maps absent next-page data to empty compatible defaults', async () => {
     const service = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => informationHtml),
-      fetchJson: vi.fn(async () => JSON.stringify({ code: 0 }))
+      fetchArticleHtml: vi.fn(),
+      fetchJson: vi.fn()
+        .mockResolvedValueOnce(firstPageJson)
+        .mockResolvedValueOnce(JSON.stringify({ code: 0 }))
     });
 
     const result = await service.getInformationList({ channel: 'AI', pages: 2 });
@@ -506,12 +549,12 @@ describe('Kr36ArticleService', () => {
   });
 
   it('rejects invalid page bounds before network access', async () => {
-    const fetchArticleHtml = vi.fn();
-    const service = new Kr36ArticleService({ fetchArticleHtml, fetchJson: vi.fn() });
+    const fetchJson = vi.fn();
+    const service = new Kr36ArticleService({ fetchArticleHtml: vi.fn(), fetchJson });
 
     await expect(service.getInformationList({ channel: 'AI', pages: 21 }))
       .rejects.toMatchObject({ code: 'KR36_INVALID_PAGES' });
-    expect(fetchArticleHtml).not.toHaveBeenCalled();
+    expect(fetchJson).not.toHaveBeenCalled();
   });
 
   it('stringifies non-Error initial-state and flow parse failures', async () => {
@@ -529,19 +572,19 @@ describe('Kr36ArticleService', () => {
     });
     initialStateParse.mockRestore();
 
-    const flowParse = vi.spyOn(JSON, 'parse')
-      .mockImplementationOnce((value) => originalParse(value))
-      .mockImplementationOnce(() => {
-        throw 'flow failed';
-      });
+    const flowParse = vi.spyOn(JSON, 'parse').mockImplementationOnce(() => {
+      throw 'flow failed';
+    });
     const listService = new Kr36ArticleService({
-      fetchArticleHtml: vi.fn(async () => informationHtml),
+      fetchArticleHtml: vi.fn(),
       fetchJson: vi.fn(async () => '{}')
     });
 
-    await expect(listService.getInformationList({ channel: 'AI', pages: 2 }))
+    await expect(listService.getInformationList({ channel: 'AI', pages: 1 }))
       .rejects.toMatchObject({ details: { cause: 'flow failed' } });
     flowParse.mockRestore();
+    // keep originalParse referenced so mock restore path stays obvious in reviews
+    expect(typeof originalParse).toBe('function');
   });
 
   it('rejects unsupported information channels', async () => {

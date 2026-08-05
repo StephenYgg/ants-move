@@ -14,12 +14,18 @@ import {
   type Kr36Request
 } from './types.js';
 
+/**
+ * Prefer www.36kr.com for HTML pages: bare 36kr.com is often intercepted by a
+ * Volcano Engine security challenge that returns no window.initialState.
+ */
+export const KR36_SITE_ORIGIN = 'https://www.36kr.com';
+
 export const KR36_BROWSER_HEADERS: Record<string, string> = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
   'Cache-Control': 'no-cache',
   Pragma: 'no-cache',
-  Referer: 'https://36kr.com/',
+  Referer: `${KR36_SITE_ORIGIN}/`,
   'Sec-Fetch-Dest': 'document',
   'Sec-Fetch-Mode': 'navigate',
   'Sec-Fetch-Site': 'same-origin',
@@ -39,7 +45,7 @@ const KR36_JSON_HEADERS: Record<string, string> = {
   Accept: 'application/json, text/plain, */*',
   'Accept-Language': KR36_BROWSER_HEADERS['Accept-Language']!,
   'Content-Type': 'application/json;charset=UTF-8',
-  Origin: 'https://36kr.com',
+  Origin: KR36_SITE_ORIGIN,
   'User-Agent': KR36_BROWSER_HEADERS['User-Agent']!
 };
 
@@ -276,18 +282,13 @@ export class Kr36ArticleService {
   }): Promise<Kr36InformationList> {
     const channel = parseInformationChannel(options.channel);
     const pageLimit = normalizePages(options.pages);
+    // First page uses gateway flow API (pageEvent 0). HTML channel pages on
+    // bare 36kr.com are frequently blocked by a security challenge.
     const firstPageRequest = buildKr36InformationFirstPageRequest(channel);
-    const firstPageHtml = await this.runtime.fetchArticleHtml(firstPageRequest);
-    const firstPageState = parseInitialState(firstPageHtml);
-    const firstPageList = firstPageState.information?.informationList;
-
-    if (!firstPageList) {
-      throw new Kr36CommandError(
-        'KR36_PARSE_ERROR',
-        '36kr information list data was not found in window.initialState.',
-        2
-      );
-    }
+    const firstPageResponse = parseInformationFlowResponse(
+      await this.runtime.fetchJson(firstPageRequest)
+    );
+    const firstPageList = firstPageResponse.data ?? {};
 
     const firstPageItems = mapInformationPageItems(firstPageList.itemList ?? []);
     let retainedBytes = addInformationRetainedBytes(0, firstPageItems);
@@ -329,7 +330,7 @@ export class Kr36ArticleService {
 
 export function buildKr36ArticleUrl(articleId: string): string {
   assertArticleId(articleId);
-  return `https://36kr.com/p/${articleId}?f=rss`;
+  return `${KR36_SITE_ORIGIN}/p/${articleId}`;
 }
 
 export function buildKr36ArticleRequest(articleId: string): Kr36Request {
@@ -339,11 +340,15 @@ export function buildKr36ArticleRequest(articleId: string): Kr36Request {
   };
 }
 
-export function buildKr36InformationFirstPageRequest(channel: Kr36InformationChannel): Kr36Request {
-  return {
-    headers: KR36_BROWSER_HEADERS,
-    url: `https://36kr.com/information/${channel}/`
-  };
+export function buildKr36InformationFirstPageRequest(
+  channel: Kr36InformationChannel,
+  timestamp = Date.now()
+): Kr36JsonRequest {
+  return buildKr36InformationFlowRequest(channel, {
+    pageCallback: '',
+    pageEvent: 0,
+    timestamp
+  });
 }
 
 export function buildKr36InformationNextPageRequest(
@@ -351,23 +356,38 @@ export function buildKr36InformationNextPageRequest(
   pageCallback: string,
   timestamp = Date.now()
 ): Kr36JsonRequest {
+  return buildKr36InformationFlowRequest(channel, {
+    pageCallback,
+    pageEvent: 1,
+    timestamp
+  });
+}
+
+function buildKr36InformationFlowRequest(
+  channel: Kr36InformationChannel,
+  options: {
+    pageCallback: string;
+    pageEvent: 0 | 1;
+    timestamp: number;
+  }
+): Kr36JsonRequest {
   return {
     body: {
       partner_id: 'web',
-      timestamp,
+      timestamp: options.timestamp,
       param: {
         subnavType: 1,
         subnavNick: channel,
         pageSize: KR36_INFORMATION_PAGE_SIZE,
-        pageEvent: 1,
-        pageCallback,
+        pageEvent: options.pageEvent,
+        pageCallback: options.pageCallback,
         siteId: 1,
         platformId: 2
       }
     },
     headers: {
       ...KR36_JSON_HEADERS,
-      Referer: `https://36kr.com/information/${channel}/`
+      Referer: `${KR36_SITE_ORIGIN}/information/${channel}/`
     },
     url: KR36_INFORMATION_ENDPOINT
   };
@@ -423,9 +443,13 @@ function parseInitialState(html: string): Kr36InitialState {
   const match = /window\.initialState=(\{[\s\S]*?\})\s*;?\s*<\/script>/.exec(html);
 
   if (!match?.[1]) {
+    const securityChallenge =
+      html.includes('正在进行安全检测') || html.includes('安全检测');
     throw new Kr36CommandError(
       'KR36_PARSE_ERROR',
-      'window.initialState was not found in the 36kr article page.',
+      securityChallenge
+        ? '36kr returned a security challenge page instead of article HTML (window.initialState missing).'
+        : 'window.initialState was not found in the 36kr article page.',
       2
     );
   }
@@ -493,7 +517,7 @@ function mapInformationItems(items: Kr36RawInformationItem[]): Kr36InformationIt
     const mapped: Kr36InformationItem = {
       id: item.itemId,
       title: material.widgetTitle ?? '',
-      url: `https://36kr.com/p/${item.itemId}`
+      url: `${KR36_SITE_ORIGIN}/p/${item.itemId}`
     };
 
     if (material.authorName !== undefined) {
