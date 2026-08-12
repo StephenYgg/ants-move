@@ -2,7 +2,7 @@
 
 **Language / 语言:** [English](README.md) · [简体中文](README.zh-CN.md)
 
-`ants-move` 是一个开源 TypeScript CLI，用于在系统之间搬运数据。命令被设计成小型 worker：采集器把数据拿进来，自动化命令可以把数据写入创作者后台等系统。当前采集器支持 36 氪、今日头条、Hacker News、GitHub；头条还支持创作者后台登录，以及文章 / 微头条的草稿与发布。
+`ants-move` 是一个开源 TypeScript CLI，用于在系统之间搬运数据。命令被设计成小型 worker：采集器把数据拿进来，自动化命令可以把数据写入创作者后台等系统。当前采集器支持 36 氪、今日头条、闲鱼（goofish）、Hacker News、GitHub；头条还支持创作者后台登录，以及文章 / 微头条的草稿与发布。闲鱼搜索需要已登录的浏览器会话。
 
 ## 安装与环境
 
@@ -48,6 +48,70 @@ ants 36kr list <AI|technology> [--pages 1..20] [--format json|table] [-t]
 - **列表**：只走官方 gateway 流式接口（`gateway.36kr.com`，首页 `pageEvent: 0`，后续页带 `pageCallback`），不再依赖频道页 HTML。
 
 分页串行，单次调用最多 20 页。每个 curl 响应与映射结果限制 20 MB，每页最多 30 条，映射列表限制 5 MB，因此一次列表最多保留 600 条，且不会跨页累积过大字段。
+
+## 闲鱼（goofish）命令
+
+这些命令使用从 `www.goofish.com` **逆向的非官方 MTOP 搜索接口**，**不是**闲鱼开放平台官方 API。账号限流、登录验证与风控仍然有效。请用个人/测试账号，保持低频，不要接到高 QPS 路径。CLI **不会**绕过验证码或风控。
+
+### 登录
+
+登录仍用有界面浏览器扫码（一次性）。会话以 Playwright `storageState` 保存（权限 `0600`），默认路径 `~/.config/ants-move/xianyu/default.json`，可用 `--state` 覆盖。纯 API 搜索复用该文件中的 Cookie（尤其 `_m_h5_tk`）。
+
+```bash
+ants xianyu auth login [--browser chrome|msedge|chromium] [--state <path>] [--timeout-ms <ms>]
+ants xianyu auth status [--browser chrome|msedge|chromium] [--state <path>] [--headed]
+ants xianyu auth logout [--state <path>]
+```
+
+### 搜索
+
+搜索需要已保存的登录态。**默认传输为纯 API**（`--transport api`）：用 `_m_h5_tk` 计算 H5 MTOP `sign`，HTTP POST `mtop.taobao.idlemtopsearch.pc.search`。可用 `--transport browser` 回退到 Playwright 页面拦截。默认 JSON；`--format table` 或 `-t` 输出表格。
+
+```bash
+ants xianyu search <keyword> \
+  [--pages 1..5] \
+  [--transport api|browser] \
+  [--sort default|price_asc|price_desc|newest|oldest|distance|credit] \
+  [--brand <名称>] [--brand-vid <vid>] \
+  [--min-price <n>] [--max-price <n>] \
+  [--publish-days 1|3|7|14] \
+  [--quick-filter personal,free_postage,new,appraise,...] \
+  [--personal] [--free-postage] [--new] [--appraise] \
+  [--province <省>] [--city <市>] [--area <区>] \
+  [--exclude-multi-places] \
+  [--lat <n> --lng <n> --distance <米>] \
+  [--format json|table] [-t] \
+  [--browser chrome|msedge|chromium] \
+  [--state <path>] \
+  [--headed]
+```
+
+示例：
+
+```bash
+ants xianyu auth login
+ants xianyu search 单反 --pages 1
+ants xianyu search 单反 --brand 佳能
+ants xianyu search 单反 --brand Canon --min-price 500 --max-price 2000 --sort price_asc --personal
+ants xianyu search 单反 --province 广东 --city 深圳 --publish-days 7 -t
+ants xianyu search 单反 --transport browser --headed
+```
+
+实现要点：
+
+- **api（默认）**：从 `storageState` 读 Cookie，按 `md5(token&t&appKey&data)` 签名后 POST `h5api.m.goofish.com`，映射 `resultList`。搜索本身不启动浏览器。
+- **browser**：在已登录会话中打开搜索页，用 Playwright 捕获同一 MTOP 响应。**高级筛选始终走 MTOP body（API 字段）**，即使指定了 `--transport browser`。
+- **PC 高级筛选**（逆向 MTOP 字段）：
+  - 排序 → `sortField` / `sortValue`
+  - 价格 / 发布时间 / 快捷筛选 → `propValueStr.searchFilter`，例如 `priceRange:500,2000;publishDays:7;quickFilter:filterPersonal;`
+  - 地区 → `extraFilterValue` 的 `divisionList`（可选排除多地卖家）
+  - 距离 → `gps` / `customGps` / `customDistance`（米）
+  - 任意筛选时 `fromFilter: true`
+  - 快捷筛选对应 UI：个人闲置、包邮、全新、验货宝、超赞鱼小铺、严选、转卖、验号担保
+- 映射字段：`itemId`、`title`、`price` / `priceNumber`，可选 `area` / `picUrl` / `userNick`，以及商品链接。`meta.transport` 标明路径。
+- 分页最多 **5** 页；结果 ≤ **5 MB**；同 state 单飞锁；token 轮换最多再试 1 次。
+- **品牌（`--brand` / `--brand-vid`）**：一条命令内部两次 MTOP——(1) 从 `cpvNavigatorDo` 解析品牌 facet 并解析名称→`pid`/`vid`，(2) 搜索时写入 `searchFilter` 的 `pid:vid;`。结果 `meta.brand` 回传解析结果；名称不存在返回 `XIANYU_BRAND_NOT_FOUND` 并列出可选品牌。
+- **仍未单独做 CLI 的**：成色/功能状态等其它 CPV tab（机制相同，可后续复用）。
 
 ## 头条命令与验证限制
 
@@ -271,9 +335,9 @@ ants github readme https://github.com/owner/repository.git
 
 ## 高并发使用警告
 
-单进程内资源使用有界，但不同进程中的相同命令**没有**全局去重或限流。在 `Q` 次并发调用下，上游工作量可接近：36 氪列表 `20Q` 请求；Hacker News 列表 `201Q` 请求；头条作者采集约 `105Q` 次浏览器导航及页面子资源；GitHub Trending 或 README 各 `Q` 次请求。README 采集还会短暂保留有界 API 响应、解析 JSON、Base64 文本与解码内容；共享源 IP 的匿名调用通常共享 GitHub 每小时 60 次限制，限流失败不会重试或回退。
+单进程内资源使用有界，但不同进程中的相同命令**没有**全局去重或限流。在 `Q` 次并发调用下，上游工作量可接近：36 氪列表 `20Q` 请求；Hacker News 列表 `201Q` 请求；头条作者采集约 `105Q` 次浏览器导航及页面子资源；闲鱼搜索约 `Q` 次浏览器会话（含页面子资源与 MTOP）；GitHub Trending 或 README 各 `Q` 次请求。README 采集还会短暂保留有界 API 响应、解析 JSON、Base64 文本与解码内容；共享源 IP 的匿名调用通常共享 GitHub 每小时 60 次限制，限流失败不会重试或回退。
 
-每次调用保留的数据也有界：36 氪列表 5 MB；Hacker News 约 200 条候选详情共约 50 MB（过滤前）；头条作者文章结果 10 MB；GitHub HTML 响应 5 MB（Cheerio 解析前）。头条在同一浏览器会话中最多还可持有 5 个活跃的 5 MB feed 缓冲；浏览器进程开销、必要子资源与 HTML 解析对象开销不计入这些 payload 上限。
+每次调用保留的数据也有界：36 氪列表 5 MB；Hacker News 约 200 条候选详情共约 50 MB（过滤前）；头条作者文章结果 10 MB；闲鱼搜索结果 5 MB；GitHub HTML 响应 5 MB（Cheerio 解析前）。头条在同一浏览器会话中最多还可持有 5 个活跃的 5 MB feed 缓冲；浏览器进程开销、必要子资源与 HTML 解析对象开销不计入这些 payload 上限。
 
 **不要**把 CLI 直接挂在高 QPS 请求路径上。在线服务必须使用外部有界队列与共享限流器，在多进程 / 多实例间施加背压。本项目没有分布式锁、共享缓存、重试队列或多实例单飞机制。
 

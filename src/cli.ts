@@ -35,6 +35,14 @@ import {
 } from './github/command.js';
 import { createDefaultGitHubRuntime } from './github/runtime.js';
 import type { GitHubRuntime } from './github/types.js';
+import {
+  handleXianyuCommandError,
+  registerXianyuCommands
+} from './xianyu/command.js';
+import {
+  createDefaultXianyuRuntime,
+  type XianyuRuntime
+} from './xianyu/runtime.js';
 
 export interface CliIo {
   stderr: (value: string) => void;
@@ -52,6 +60,7 @@ export interface CreateCliOptions extends Partial<CliIo> {
   kr36Runtime?: Kr36Runtime;
   toutiaoPublishRuntime?: ToutiaoPublishRuntime;
   toutiaoRuntime?: ToutiaoRuntime;
+  xianyuRuntime?: XianyuRuntime;
 }
 
 export function createCli(options: CreateCliOptions = {}): CliRunner {
@@ -100,6 +109,11 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
     stderr: io.stderr,
     stdout: io.stdout
   });
+  registerXianyuCommands(program, {
+    runtime: options.xianyuRuntime ?? createDefaultXianyuRuntime(),
+    stderr: io.stderr,
+    stdout: io.stdout
+  });
 
   return {
     run: async (args) => {
@@ -119,6 +133,11 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
         const toutiaoExitCode = handleToutiaoCommandError(error, io);
         if (toutiaoExitCode !== undefined) {
           return toutiaoExitCode;
+        }
+
+        const xianyuExitCode = handleXianyuCommandError(error, io);
+        if (xianyuExitCode !== undefined) {
+          return xianyuExitCode;
         }
 
         const hackerNewsExitCode = handleHackerNewsCommandError(error, io);

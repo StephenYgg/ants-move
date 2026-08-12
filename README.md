@@ -2,7 +2,7 @@
 
 **Language / 语言:** [English](README.md) · [简体中文](README.zh-CN.md)
 
-`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and automation commands can move data into creator consoles and other systems. The current collectors read 36Kr, Toutiao, Hacker News, and GitHub data. Toutiao also supports creator-console auth and draft/publish commands for articles and micro-posts.
+`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and automation commands can move data into creator consoles and other systems. The current collectors read 36Kr, Toutiao, Xianyu (goofish), Hacker News, and GitHub data. Toutiao also supports creator-console auth and draft/publish commands for articles and micro-posts. Xianyu search requires a logged-in browser session.
 
 ## Installation and requirements
 
@@ -48,6 +48,70 @@ How collection works:
 - **List** uses only the official gateway flow API (`gateway.36kr.com`, first page `pageEvent: 0`, later pages with `pageCallback`). It does not scrape channel HTML for the first page.
 
 Pagination is serial and bounded at 20 pages per invocation. Each curl response and mapped article result is limited to 20 MB, each list page to 30 items, and the mapped list to 5 MB, so a list retains at most 600 items without accumulating oversized fields across pages.
+
+## Xianyu (goofish) commands
+
+These commands use an **unofficial** reverse-engineered MTOP search endpoint from `www.goofish.com`. They are **not** an official Xianyu open API. Account rate limits, login challenges, and policy enforcement still apply. Use a personal/test account, keep frequency low, and never place the CLI on a high-QPS path. The CLI does not bypass captchas or risk controls.
+
+### Auth
+
+Login still uses a headed browser and QR scan (one-time). The session is stored as a Playwright `storageState` file (mode `0600`) at `~/.config/ants-move/xianyu/default.json` unless `--state` overrides the path. Pure API search reuses the cookies (especially `_m_h5_tk`) from that file.
+
+```bash
+ants xianyu auth login [--browser chrome|msedge|chromium] [--state <path>] [--timeout-ms <ms>]
+ants xianyu auth status [--browser chrome|msedge|chromium] [--state <path>] [--headed]
+ants xianyu auth logout [--state <path>]
+```
+
+### Search
+
+Search requires a saved auth state. **Default transport is pure API** (`--transport api`): HTTP POST to `mtop.taobao.idlemtopsearch.pc.search` with H5 MTOP `sign` derived from `_m_h5_tk`. Use `--transport browser` to fall back to Playwright page intercept. Default output is JSON; use `--format table` or `-t` for a table.
+
+```bash
+ants xianyu search <keyword> \
+  [--pages 1..5] \
+  [--transport api|browser] \
+  [--sort default|price_asc|price_desc|newest|oldest|distance|credit] \
+  [--brand <name>] [--brand-vid <vid>] \
+  [--min-price <n>] [--max-price <n>] \
+  [--publish-days 1|3|7|14] \
+  [--quick-filter personal,free_postage,new,appraise,...] \
+  [--personal] [--free-postage] [--new] [--appraise] \
+  [--province <省>] [--city <市>] [--area <区>] \
+  [--exclude-multi-places] \
+  [--lat <n> --lng <n> --distance <meters>] \
+  [--format json|table] [-t] \
+  [--browser chrome|msedge|chromium] \
+  [--state <path>] \
+  [--headed]
+```
+
+Example:
+
+```bash
+ants xianyu auth login
+ants xianyu search 单反 --pages 1
+ants xianyu search 单反 --brand 佳能
+ants xianyu search 单反 --brand Canon --min-price 500 --max-price 2000 --sort price_asc --personal
+ants xianyu search 单反 --province 广东 --city 深圳 --publish-days 7 -t
+ants xianyu search 单反 --transport browser --headed
+```
+
+How it works:
+
+- **api (default):** reads cookies from `storageState`, signs each request as `md5(token&t&appKey&data)`, POSTs to `h5api.m.goofish.com`, maps `resultList`. No browser process for search itself.
+- **browser:** opens the search page under your saved session and captures the same MTOP response via Playwright. **Advanced filters are always sent on the MTOP body (API path)** even if you pass `--transport browser`.
+- **PC advanced filters** (reverse-engineered MTOP fields):
+  - Sort → `sortField` / `sortValue` (`price`/`create`/`pos`/`credit` + `asc`/`desc`)
+  - Price / days / quick filters → `propValueStr.searchFilter` string, e.g. `priceRange:500,2000;publishDays:7;quickFilter:filterPersonal;`
+  - Region → `extraFilterValue` JSON `divisionList` (+ optional `excludeMultiPlacesSellers`)
+  - Distance → `gps` / `customGps` / `customDistance` (meters)
+  - Any filter sets `fromFilter: true`
+  - Quick filters map UI labels: 个人闲置=`filterPersonal`, 包邮=`filterFreePostage`, 全新=`filterNew`, 验货宝=`filterAppraise`, 超赞鱼小铺, 严选, 转卖, 验号担保
+- Maps each card to `itemId`, `title`, `price` / `priceNumber`, optional `area` / `picUrl` / `userNick`, and a `https://www.goofish.com/item?id=...` URL. Result `meta.transport` reports which path ran.
+- Pagination is serial and bounded at **5 pages** per invocation (about 30 items per page). Results are capped at **5 MB** retained JSON. Same auth state file is single-flight locked (`XIANYU_LOCK_HELD` under concurrency). Failed pages are not auto-retried in a loop (token rotation is retried once on pure API).
+- **Brand (`--brand` / `--brand-vid`):** one command does two MTOP calls — (1) facet discovery from `sqiControlFields.cpvNavigatorDo`, resolve name → `pid`/`vid`, (2) search with `searchFilter` clause `pid:vid;`. Result `meta.brand` reports the resolved facet. Unknown names return `XIANYU_BRAND_NOT_FOUND` with available brands.
+- **Still not automated:** other CPV tabs (成色/功能状态/型号 trees beyond brand) as dedicated flags; can reuse the same facet machinery later.
 
 ## Toutiao commands and verification limitations
 
@@ -273,9 +337,9 @@ Only public repositories are supported. GitHub normally limits unauthenticated R
 
 ## High-concurrency usage warning
 
-Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, or `Q` requests for either GitHub Trending or GitHub README. README collection also briefly retains a bounded API response, parsed JSON, Base64 text, and decoded content; anonymous callers sharing a source IP normally share GitHub's 60 requests per hour limit, and rate-limit failures do not retry or fall back.
+Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, about `Q` headed/headless browser sessions for Xianyu search (plus page subresources and MTOP calls), or `Q` requests for either GitHub Trending or GitHub README. README collection also briefly retains a bounded API response, parsed JSON, Base64 text, and decoded content; anonymous callers sharing a source IP normally share GitHub's 60 requests per hour limit, and rate-limit failures do not retry or fall back.
 
-Retained collector data is also bounded per invocation: 5 MB for a 36Kr list, approximately 50 MB across 200 Hacker News candidate details before result filtering, 10 MB for Toutiao author article results, and one 5 MB GitHub HTML response before Cheerio parsing. Toutiao may additionally hold up to five active 5 MB feed buffers inside one browser session; browser process overhead, required page subresources, and HTML parser object overhead are separate from these payload limits.
+Retained collector data is also bounded per invocation: 5 MB for a 36Kr list, approximately 50 MB across 200 Hacker News candidate details before result filtering, 10 MB for Toutiao author article results, 5 MB for a Xianyu search result set, and one 5 MB GitHub HTML response before Cheerio parsing. Toutiao may additionally hold up to five active 5 MB feed buffers inside one browser session; browser process overhead, required page subresources, and HTML parser object overhead are separate from these payload limits.
 
 Do not place the CLI directly on a high-QPS request path. Online services must use an external bounded queue and a shared rate limiter to apply backpressure across processes and instances. This project has no distributed lock, shared cache, retry queue, or multi-instance single-flight mechanism.
 

@@ -17,6 +17,7 @@ describe('ants CLI', () => {
     expect(stdout).toContain('Move data between systems');
     expect(stdout).toContain('36kr');
     expect(stdout).toContain('toutiao');
+    expect(stdout).toContain('xianyu');
     expect(stdout).toContain('hn|hackernews');
     expect(stdout).toContain('github');
     expect(stdout).not.toMatch(/^\s+(?:ak|config|disk|video|stephen)\b/m);
