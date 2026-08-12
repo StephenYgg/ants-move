@@ -2,7 +2,7 @@
 
 **Language / 语言:** [English](README.md) · [简体中文](README.zh-CN.md)
 
-`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and automation commands can move data into creator consoles and other systems. The current collectors read 36Kr, Toutiao, Xianyu (goofish), Hacker News, and GitHub data. Toutiao also supports creator-console auth and draft/publish commands for articles and micro-posts. Xianyu search requires a logged-in browser session.
+`ants-move` is an open-source TypeScript CLI for moving data between systems. Its commands are small workers: collectors bring data in, and automation commands can move data into creator consoles and other systems. The current collectors read 36Kr, Toutiao, Xianyu (goofish), Hacker News, GitHub, and major tech/AI media feeds (WIRED, MIT Technology Review, TechCrunch, The Verge, Ars Technica, Engadget, IEEE Spectrum, BBC Technology, Google AI / DeepMind / NVIDIA / OpenAI blogs, and Bloomberg headlines). Toutiao also supports creator-console auth and draft/publish commands for articles and micro-posts. Xianyu search requires a logged-in browser session.
 
 ## Installation and requirements
 
@@ -10,7 +10,7 @@ Requirements:
 
 - Node.js 22 or later
 - npm
-- `curl` on `PATH` for 36Kr collection
+- `curl` on `PATH` for 36Kr collection and tech/AI media collectors
 - Chromium installed through Playwright for Toutiao collection
 
 Install the package globally, then install the browser used by Toutiao:
@@ -335,9 +335,57 @@ The command returns JSON containing the raw UTF-8 README content together with i
 
 Only public repositories are supported. GitHub normally limits unauthenticated REST clients sharing one source IP to 60 requests per hour. When that allowance is exhausted, the command returns `GITHUB_RATE_LIMITED` without retrying.
 
+## Tech / AI media collectors
+
+These collectors fetch public RSS/Atom feeds for lists and public article HTML for full text. Requests use `curl` with stable browser-like headers (Chrome desktop User-Agent, `Accept`, `Accept-Language`, `Sec-Fetch-*`, `Referer`/`Origin`). They are not official publisher APIs. Keep frequency low for personal use; the CLI does not bypass paywalls, captchas, or bot challenges.
+
+Shared shape:
+
+```bash
+ants <source> list <channel> [--limit 1..50] [--format json|table] [-t]
+ants <source> article <id-or-url> [--format json]
+```
+
+`--limit` defaults to 20 and is capped at 50. List JSON includes `title`, `summary`, `authorName`, `publishTime`, `url`, and image fields when the feed provides them. Article JSON includes `title`, `summary`, `author`, `publishTime`, `content.paragraphs`, `coverImage`, and `images[].url`. Missing article body hard-fails with `MEDIA_PARSE_ERROR` instead of returning a silent partial payload.
+
+| Command | Source | Channels | Article body |
+|---------|--------|----------|--------------|
+| `wired` | WIRED | `AI`, `technology`, `business`, `science`, `security`, `all` | yes |
+| `mtr` | MIT Technology Review | `AI`, `technology` | yes |
+| `techcrunch` | TechCrunch | `AI`, `technology` | yes |
+| `verge` | The Verge | `AI`, `technology` | yes |
+| `ars` | Ars Technica | `AI`, `technology` | yes |
+| `engadget` | Engadget | `AI` (keyword filter), `technology` | yes |
+| `ieee` | IEEE Spectrum | `AI` (keyword filter), `technology` | yes |
+| `bbc` | BBC Technology | `AI` (keyword filter), `technology` | yes |
+| `google-ai` | Google AI Blog | `AI`, `technology` | yes |
+| `deepmind` | Google DeepMind Blog | `AI`, `technology` | yes |
+| `nvidia` | NVIDIA Blog | `AI`, `technology` | yes |
+| `openai` | OpenAI Blog | `AI`, `technology` | yes |
+| `bloomberg` | Bloomberg Technology | `AI` (keyword filter), `technology` | **list only** |
+
+Examples:
+
+```bash
+ants wired list AI
+ants wired list AI --limit 10 -t
+ants wired article ai-newsrooms-are-breaking-news-now-haha-im-in-danger
+ants wired article https://www.wired.com/story/example-slug/
+
+ants mtr list AI
+ants techcrunch list AI --limit 15
+ants verge list technology
+ants bloomberg list technology
+ants bloomberg list AI
+```
+
+Bloomberg exposes headlines and summaries from the public Technology RSS feed only. Full Bloomberg article HTML is paywalled / bot-protected; there is no `bloomberg article` subcommand.
+
+Each list call performs one bounded feed request. Each article call performs one bounded HTML request. Response bodies are limited through curl (`8 MB` default buffer). There is no background polling, cache, or multi-page fan-out.
+
 ## High-concurrency usage warning
 
-Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, about `Q` headed/headless browser sessions for Xianyu search (plus page subresources and MTOP calls), or `Q` requests for either GitHub Trending or GitHub README. README collection also briefly retains a bounded API response, parsed JSON, Base64 text, and decoded content; anonymous callers sharing a source IP normally share GitHub's 60 requests per hour limit, and rate-limit failures do not retry or fall back.
+Resource use is bounded within one process, but identical commands running in separate processes are not globally deduplicated or rate limited. At `Q` concurrent invocations, upstream work can approach `20Q` requests for a 36Kr list, `201Q` requests for a Hacker News list, `105Q` browser navigations plus page subresources for a Toutiao author collection, about `Q` headed/headless browser sessions for Xianyu search (plus page subresources and MTOP calls), `Q` requests for either GitHub Trending or GitHub README, or about `Q` curl requests for a tech/AI media list (or `2Q` when list and article are both invoked). README collection also briefly retains a bounded API response, parsed JSON, Base64 text, and decoded content; anonymous callers sharing a source IP normally share GitHub's 60 requests per hour limit, and rate-limit failures do not retry or fall back.
 
 Retained collector data is also bounded per invocation: 5 MB for a 36Kr list, approximately 50 MB across 200 Hacker News candidate details before result filtering, 10 MB for Toutiao author article results, 5 MB for a Xianyu search result set, and one 5 MB GitHub HTML response before Cheerio parsing. Toutiao may additionally hold up to five active 5 MB feed buffers inside one browser session; browser process overhead, required page subresources, and HTML parser object overhead are separate from these payload limits.
 

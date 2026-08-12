@@ -58,7 +58,15 @@ describe('project documentation', () => {
       'shared rate limiter',
       'README.zh-CN.md',
       '[English](README.md)',
-      '[简体中文](README.zh-CN.md)'
+      '[简体中文](README.zh-CN.md)',
+      'ants wired list AI',
+      'ants wired article',
+      'ants mtr list AI',
+      'ants techcrunch list AI',
+      'ants bloomberg list technology',
+      'list only',
+      'MEDIA_PARSE_ERROR',
+      'browser-like headers'
     ]) {
       expect(readme).toContain(requiredText);
     }
@@ -84,7 +92,11 @@ describe('project documentation', () => {
       '折叠到文末',
       '头条首发',
       '默认存草稿',
-      'connectOverCDP'
+      'connectOverCDP',
+      'ants wired list AI',
+      'ants bloomberg list technology',
+      '仅列表',
+      'MEDIA_PARSE_ERROR'
     ]) {
       expect(zh).toContain(requiredText);
     }

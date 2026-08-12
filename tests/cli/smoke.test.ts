@@ -20,6 +20,9 @@ describe('ants CLI', () => {
     expect(stdout).toContain('xianyu');
     expect(stdout).toContain('hn|hackernews');
     expect(stdout).toContain('github');
+    expect(stdout).toContain('wired');
+    expect(stdout).toContain('techcrunch');
+    expect(stdout).toContain('bloomberg');
     expect(stdout).not.toMatch(/^\s+(?:ak|config|disk|video|stephen)\b/m);
   });
 });

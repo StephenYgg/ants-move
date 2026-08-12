@@ -43,6 +43,14 @@ import {
   createDefaultXianyuRuntime,
   type XianyuRuntime
 } from './xianyu/runtime.js';
+import {
+  handleMediaCommandError,
+  registerMediaCommands
+} from './media/command.js';
+import {
+  createDefaultMediaRuntime,
+  type MediaRuntime
+} from './media/runtime.js';
 
 export interface CliIo {
   stderr: (value: string) => void;
@@ -58,6 +66,7 @@ export interface CreateCliOptions extends Partial<CliIo> {
     Partial<Pick<GitHubRuntime, 'fetchReadme'>>;
   hackerNewsRuntime?: HackerNewsRuntime;
   kr36Runtime?: Kr36Runtime;
+  mediaRuntime?: MediaRuntime;
   toutiaoPublishRuntime?: ToutiaoPublishRuntime;
   toutiaoRuntime?: ToutiaoRuntime;
   xianyuRuntime?: XianyuRuntime;
@@ -114,6 +123,11 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
     stderr: io.stderr,
     stdout: io.stdout
   });
+  registerMediaCommands(program, {
+    runtime: options.mediaRuntime ?? createDefaultMediaRuntime(),
+    stderr: io.stderr,
+    stdout: io.stdout
+  });
 
   return {
     run: async (args) => {
@@ -143,6 +157,11 @@ export function createCli(options: CreateCliOptions = {}): CliRunner {
         const hackerNewsExitCode = handleHackerNewsCommandError(error, io);
         if (hackerNewsExitCode !== undefined) {
           return hackerNewsExitCode;
+        }
+
+        const mediaExitCode = handleMediaCommandError(error, io);
+        if (mediaExitCode !== undefined) {
+          return mediaExitCode;
         }
 
         const kr36ExitCode = handleKr36CommandError(error, io);

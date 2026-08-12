@@ -2,7 +2,7 @@
 
 **Language / 语言:** [English](README.md) · [简体中文](README.zh-CN.md)
 
-`ants-move` 是一个开源 TypeScript CLI，用于在系统之间搬运数据。命令被设计成小型 worker：采集器把数据拿进来，自动化命令可以把数据写入创作者后台等系统。当前采集器支持 36 氪、今日头条、闲鱼（goofish）、Hacker News、GitHub；头条还支持创作者后台登录，以及文章 / 微头条的草稿与发布。闲鱼搜索需要已登录的浏览器会话。
+`ants-move` 是一个开源 TypeScript CLI，用于在系统之间搬运数据。命令被设计成小型 worker：采集器把数据拿进来，自动化命令可以把数据写入创作者后台等系统。当前采集器支持 36 氪、今日头条、闲鱼（goofish）、Hacker News、GitHub，以及主流科技 / AI 媒体（WIRED、MIT Technology Review、TechCrunch、The Verge、Ars Technica、Engadget、IEEE Spectrum、BBC Technology、Google AI / DeepMind / NVIDIA / OpenAI 博客、Bloomberg 标题流）。头条还支持创作者后台登录，以及文章 / 微头条的草稿与发布。闲鱼搜索需要已登录的浏览器会话。
 
 ## 安装与环境
 
@@ -10,7 +10,7 @@
 
 - Node.js 22 或更高
 - npm
-- `PATH` 中可用的 `curl`（36 氪采集）
+- `PATH` 中可用的 `curl`（36 氪与科技 / AI 媒体采集）
 - 通过 Playwright 安装的 Chromium（头条采集）
 
 全局安装包，并安装头条采集用的浏览器：
@@ -333,9 +333,57 @@ ants github readme https://github.com/owner/repository.git
 
 仅支持公开仓库。未认证 REST 客户端共享源 IP 时，GitHub 通常限制为每小时 60 次请求。额度用尽返回 `GITHUB_RATE_LIMITED`，且不重试。
 
+## 科技 / AI 媒体采集
+
+这些采集器用公开 RSS/Atom 拉列表，用公开文章 HTML 拉正文。请求走 `curl`，并带稳定的浏览器伪装头（Chrome Desktop UA、`Accept`、`Accept-Language`、`Sec-Fetch-*`、`Referer`/`Origin`）。**不是**各媒体官方开放 API。请保持个人低频使用；CLI **不会**绕过付费墙、验证码或安全挑战页。
+
+统一形态：
+
+```bash
+ants <source> list <channel> [--limit 1..50] [--format json|table] [-t]
+ants <source> article <id-or-url> [--format json]
+```
+
+`--limit` 默认 20，上限 50。列表 JSON 在 feed 提供时包含 `title`、`summary`、`authorName`、`publishTime`、`url` 与图片字段。正文 JSON 包含 `title`、`summary`、`author`、`publishTime`、`content.paragraphs`、`coverImage`、`images[].url`。拿不到正文时硬失败（`MEDIA_PARSE_ERROR`），不会静默返回半截内容。
+
+| 命令 | 来源 | 频道 | 正文 |
+|------|------|------|------|
+| `wired` | WIRED | `AI`、`technology`、`business`、`science`、`security`、`all` | 支持 |
+| `mtr` | MIT Technology Review | `AI`、`technology` | 支持 |
+| `techcrunch` | TechCrunch | `AI`、`technology` | 支持 |
+| `verge` | The Verge | `AI`、`technology` | 支持 |
+| `ars` | Ars Technica | `AI`、`technology` | 支持 |
+| `engadget` | Engadget | `AI`（关键词过滤）、`technology` | 支持 |
+| `ieee` | IEEE Spectrum | `AI`（关键词过滤）、`technology` | 支持 |
+| `bbc` | BBC Technology | `AI`（关键词过滤）、`technology` | 支持 |
+| `google-ai` | Google AI Blog | `AI`、`technology` | 支持 |
+| `deepmind` | Google DeepMind Blog | `AI`、`technology` | 支持 |
+| `nvidia` | NVIDIA Blog | `AI`、`technology` | 支持 |
+| `openai` | OpenAI Blog | `AI`、`technology` | 支持 |
+| `bloomberg` | Bloomberg Technology | `AI`（关键词过滤）、`technology` | **仅列表** |
+
+示例：
+
+```bash
+ants wired list AI
+ants wired list AI --limit 10 -t
+ants wired article ai-newsrooms-are-breaking-news-now-haha-im-in-danger
+ants wired article https://www.wired.com/story/example-slug/
+
+ants mtr list AI
+ants techcrunch list AI --limit 15
+ants verge list technology
+ants bloomberg list technology
+ants bloomberg list AI
+```
+
+Bloomberg 仅提供 Technology 公开 RSS 的标题与摘要。文章 HTML 有付费墙 / 反爬；**没有** `bloomberg article` 子命令。
+
+每次 list 一次有界 feed 请求；每次 article 一次有界 HTML 请求。响应体经 curl 缓冲限制（默认 8 MB）。无后台轮询、缓存或多页扇出。
+
 ## 高并发使用警告
 
-单进程内资源使用有界，但不同进程中的相同命令**没有**全局去重或限流。在 `Q` 次并发调用下，上游工作量可接近：36 氪列表 `20Q` 请求；Hacker News 列表 `201Q` 请求；头条作者采集约 `105Q` 次浏览器导航及页面子资源；闲鱼搜索约 `Q` 次浏览器会话（含页面子资源与 MTOP）；GitHub Trending 或 README 各 `Q` 次请求。README 采集还会短暂保留有界 API 响应、解析 JSON、Base64 文本与解码内容；共享源 IP 的匿名调用通常共享 GitHub 每小时 60 次限制，限流失败不会重试或回退。
+单进程内资源使用有界，但不同进程中的相同命令**没有**全局去重或限流。在 `Q` 次并发调用下，上游工作量可接近：36 氪列表 `20Q` 请求；Hacker News 列表 `201Q` 请求；头条作者采集约 `105Q` 次浏览器导航及页面子资源；闲鱼搜索约 `Q` 次浏览器会话（含页面子资源与 MTOP）；GitHub Trending 或 README 各 `Q` 次请求；科技 / AI 媒体 list 约 `Q` 次 curl（list+article 约 `2Q`）。README 采集还会短暂保留有界 API 响应、解析 JSON、Base64 文本与解码内容；共享源 IP 的匿名调用通常共享 GitHub 每小时 60 次限制，限流失败不会重试或回退。
 
 每次调用保留的数据也有界：36 氪列表 5 MB；Hacker News 约 200 条候选详情共约 50 MB（过滤前）；头条作者文章结果 10 MB；闲鱼搜索结果 5 MB；GitHub HTML 响应 5 MB（Cheerio 解析前）。头条在同一浏览器会话中最多还可持有 5 个活跃的 5 MB feed 缓冲；浏览器进程开销、必要子资源与 HTML 解析对象开销不计入这些 payload 上限。
 
